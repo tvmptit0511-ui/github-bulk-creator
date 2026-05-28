@@ -1,12 +1,12 @@
 'use client';
 import { useState, useCallback, useMemo } from 'react';
-import { Rocket, History, Settings } from 'lucide-react';
+import { Rocket, History, Settings, RefreshCw } from 'lucide-react';
 import AuthCard from './components/AuthCard';
 import RepoNameBuilder from './components/RepoNameBuilder';
 import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
 import LogPanel from './components/LogPanel';
 import HistoryPanel from './components/HistoryPanel';
-import { createRepo, uploadFile, getUserOrgs } from './lib/github';
+import { createRepo, uploadFile, getUserOrgs, getOrgMembership } from './lib/github';
 import { saveHistory } from './lib/storage';
 import { CreationMode, LogItem, RepoFile } from './types';
 
@@ -19,11 +19,15 @@ export default function Home() {
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
   const [userOrgs, setUserOrgs] = useState<string[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
 
   // Owner — personal hoặc org
   const [ownerType, setOwnerType] = useState<'personal' | 'org'>('personal');
   const [orgName, setOrgName] = useState('');
   const [customOrgInput, setCustomOrgInput] = useState(false);
+  // Membership role của user trong org đang chọn
+  const [orgRole, setOrgRole] = useState<'admin' | 'member' | 'none' | null>(null);
+  const [orgRoleLoading, setOrgRoleLoading] = useState(false);
 
   // Repo naming
   const [mode, setMode] = useState<CreationMode>('range');
@@ -96,11 +100,9 @@ export default function Home() {
       const perRepo = syncedEntries.find(e => e.name === name)?.files ?? [];
       const mergedFiles: RepoFile[] = [...sharedFiles];
       for (const f of perRepo) {
-        if (!mergedFiles.find(x => x.name === f.name)) mergedFiles.push(f);
-        else {
-          const idx = mergedFiles.findIndex(x => x.name === f.name);
-          mergedFiles[idx] = f;
-        }
+        const idx = mergedFiles.findIndex(x => x.name === f.name);
+        if (idx === -1) mergedFiles.push(f);
+        else mergedFiles[idx] = f;
       }
 
       try {
@@ -111,7 +113,11 @@ export default function Home() {
             await uploadFile(token, owner, name, f);
           }
         }
-        updateLog(name, { status: 'ok', message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`, url: repo.html_url });
+        updateLog(name, {
+          status: 'ok',
+          message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`,
+          url: repo.html_url,
+        });
         results.push({ name, status: 'ok', url: repo.html_url });
         ok++; setOkCount(ok);
       } catch (e) {
@@ -130,16 +136,28 @@ export default function Home() {
   const handleAuth = useCallback(async (t: string, u: string, _avatar: string) => {
     setToken(t);
     setUsername(u);
-    // Reset về personal mỗi khi đổi tài khoản
     setOwnerType('personal');
     setOrgName('');
     setCustomOrgInput(false);
+    setOrgRole(null);
     // Fetch danh sách org
+    setOrgsLoading(true);
     const orgs = await getUserOrgs(t);
     setUserOrgs(orgs);
+    setOrgsLoading(false);
   }, []);
 
+  /** Kiểm tra role khi user chọn / nhập xong tên org */
+  async function checkOrgRole(org: string) {
+    if (!org || !token || !username) { setOrgRole(null); return; }
+    setOrgRoleLoading(true);
+    const role = await getOrgMembership(token, username, org);
+    setOrgRole(role);
+    setOrgRoleLoading(false);
+  }
+
   function handleOwnerSelect(value: string) {
+    setOrgRole(null);
     if (value === 'personal') {
       setOwnerType('personal');
       setOrgName('');
@@ -152,17 +170,54 @@ export default function Home() {
       setOwnerType('org');
       setOrgName(value);
       setCustomOrgInput(false);
+      checkOrgRole(value);
     }
+  }
+
+  async function handleRefreshOrgs() {
+    if (!token) return;
+    setOrgsLoading(true);
+    const orgs = await getUserOrgs(token);
+    setUserOrgs(orgs);
+    setOrgsLoading(false);
   }
 
   const selectValue = ownerType === 'personal'
     ? 'personal'
     : customOrgInput ? '__custom__' : orgName;
 
+  /** Badge màu cho org role */
+  function orgRoleBadge() {
+    if (orgRoleLoading) return <span style={{ fontSize: 12, color: 'var(--muted)' }}>Đang kiểm tra quyền...</span>;
+    if (!orgRole || orgRole === 'none') return (
+      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--danger, #f85149)' }}>
+        ⚠ Không tìm thấy membership trong org này — repo có thể không tạo được.
+      </div>
+    );
+    const color = orgRole === 'admin' ? 'var(--success, #3fb950)' : '#58a6ff';
+    const label = orgRole === 'admin' ? '👑 Owner/Admin' : '👤 Member';
+    return (
+      <div style={{ marginTop: 6, fontSize: 12, color }}>
+        {label} tại <strong>{orgName}</strong> — repo sẽ tạo tại github.com/<strong>{orgName}</strong>
+        {orgRole === 'member' && (
+          <span style={{ color: 'var(--warning, #d29922)', marginLeft: 6 }}>
+            (cần org cho phép member tạo repo)
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <header style={{ borderBottom: '1px solid var(--border)', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 10 }}>
-        <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
+      <header style={{
+        borderBottom: '1px solid var(--border)', padding: '12px 24px',
+        display: 'flex', alignItems: 'center', gap: 12,
+        position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 10,
+      }}>
+        <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+        </svg>
         <span style={{ fontWeight: 700, fontSize: 15 }}>GitHub Bulk Repo Creator</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className={`tab ${tab === 'create' ? 'active' : ''}`} onClick={() => setTab('create')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -198,14 +253,40 @@ export default function Home() {
               {/* Owner selector — chỉ hiện khi đã auth */}
               {token && (
                 <div style={{ marginBottom: 12 }}>
-                  <label>Tạo repo vào</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Tạo repo vào
+                    {/* Nút refresh org list */}
+                    <button
+                      onClick={handleRefreshOrgs}
+                      disabled={orgsLoading}
+                      title="Tải lại danh sách organization"
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--muted)', padding: '0 2px', display: 'flex',
+                      }}
+                    >
+                      <RefreshCw size={12} style={orgsLoading ? { animation: 'spin 1s linear infinite' } : {}} />
+                    </button>
+                    {orgsLoading && <span style={{ fontSize: 11, color: 'var(--muted)' }}>Đang tải org...</span>}
+                  </label>
+
                   <select value={selectValue} onChange={e => handleOwnerSelect(e.target.value)}>
                     <option value="personal">👤 Cá nhân ({username})</option>
-                    {userOrgs.map(org => (
-                      <option key={org} value={org}>🏢 {org}</option>
-                    ))}
+                    {userOrgs.length > 0 && (
+                      <optgroup label="Organizations của bạn">
+                        {userOrgs.map(org => (
+                          <option key={org} value={org}>🏢 {org}</option>
+                        ))}
+                      </optgroup>
+                    )}
                     <option value="__custom__">✏️ Nhập tên org khác...</option>
                   </select>
+
+                  {userOrgs.length === 0 && !orgsLoading && (
+                    <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      Không tìm thấy org nào. Token có thể thiếu quyền <code style={{ background: 'var(--surface2)', padding: '1px 3px', borderRadius: 2 }}>read:org</code>.
+                    </p>
+                  )}
 
                   {/* Input thủ công nếu chọn "Nhập tay" */}
                   {customOrgInput && (
@@ -215,15 +296,12 @@ export default function Home() {
                       placeholder="Tên organization (VD: my-company)"
                       value={orgName}
                       onChange={e => setOrgName(e.target.value)}
+                      onBlur={() => checkOrgRole(orgName)}
                     />
                   )}
 
-                  {/* Badge xác nhận owner hiện tại */}
-                  {ownerType === 'org' && orgName && (
-                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--success, #3fb950)' }}>
-                      ✓ Repo sẽ được tạo tại github.com/<strong>{orgName}</strong>
-                    </div>
-                  )}
+                  {/* Badge trạng thái org */}
+                  {ownerType === 'org' && orgName && orgRoleBadge()}
                 </div>
               )}
 

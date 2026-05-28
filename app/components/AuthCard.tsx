@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Eye, EyeOff, CheckCircle, XCircle, Loader } from 'lucide-react';
-import { getUser } from '@/app/lib/github';
+import { Eye, EyeOff, CheckCircle, XCircle, Loader, AlertTriangle } from 'lucide-react';
+import { getUser, getTokenScopes, hasOrgScope } from '@/app/lib/github';
 import { saveToken, getToken, saveUsername, getUsername } from '@/app/lib/storage';
 
 interface Props {
@@ -15,6 +15,8 @@ export default function AuthCard({ onAuth }: Props) {
   const [status, setStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [userInfo, setUserInfo] = useState<{ login: string; avatar_url: string } | null>(null);
+  // Scope warnings
+  const [scopeWarning, setScopeWarning] = useState<string | null>(null);
 
   useEffect(() => {
     const savedToken = getToken();
@@ -30,14 +32,29 @@ export default function AuthCard({ onAuth }: Props) {
     if (!t.trim()) return;
     setStatus('checking');
     setErrorMsg('');
+    setScopeWarning(null);
+
     try {
-      const user = await getUser(t.trim());
+      // Fetch user info và scopes song song
+      const [user, scopes] = await Promise.all([
+        getUser(t.trim()),
+        getTokenScopes(t.trim()),
+      ]);
+
       setUserInfo(user);
       setUsername(user.login);
       setStatus('ok');
       saveToken(t.trim());
       saveUsername(user.login);
       onAuth(t.trim(), user.login, user.avatar_url);
+
+      // Kiểm tra scope org
+      if (!hasOrgScope(scopes)) {
+        setScopeWarning(
+          `Token thiếu quyền org (hiện có: ${scopes.length ? scopes.join(', ') : 'không xác định'}). ` +
+          `Bạn vẫn tạo được repo cá nhân, nhưng cần thêm scope "read:org" hoặc "admin:org" để tạo repo trong Organization.`
+        );
+      }
     } catch (e) {
       setStatus('error');
       setErrorMsg((e as Error).message);
@@ -48,7 +65,6 @@ export default function AuthCard({ onAuth }: Props) {
   function handleUsernameChange(val: string) {
     setUsername(val);
     saveUsername(val);
-    // Notify parent with current token (even if not verified via API)
     if (token && status === 'ok') {
       onAuth(token, val, userInfo?.avatar_url || '');
     }
@@ -80,7 +96,9 @@ export default function AuthCard({ onAuth }: Props) {
           placeholder="IT-205-PYTHON"
         />
         <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>
-          VD: <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>https://github.com/<strong style={{ color: '#79c0ff' }}>{username || 'IT-205-PYTHON'}</strong>/</code>
+          VD: <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>
+            https://github.com/<strong style={{ color: '#79c0ff' }}>{username || 'IT-205-PYTHON'}</strong>/
+          </code>
           &nbsp;— tự động điền khi xác thực token
         </p>
       </div>
@@ -93,19 +111,29 @@ export default function AuthCard({ onAuth }: Props) {
             <input
               type={show ? 'text' : 'password'}
               value={token}
-              onChange={e => { setToken(e.target.value); setStatus('idle'); }}
+              onChange={e => { setToken(e.target.value); setStatus('idle'); setScopeWarning(null); }}
               placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
               style={{ paddingRight: 36 }}
               onKeyDown={e => e.key === 'Enter' && verifyToken()}
             />
             <button
               onClick={() => setShow(v => !v)}
-              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 0, display: 'flex' }}
+              style={{
+                position: 'absolute', right: 8, top: '50%',
+                transform: 'translateY(-50%)', background: 'none',
+                border: 'none', cursor: 'pointer', color: 'var(--muted)',
+                padding: 0, display: 'flex',
+              }}
             >
               {show ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
-          <button className="btn-green" onClick={() => verifyToken()} disabled={!token.trim() || status === 'checking'} style={{ minWidth: 90 }}>
+          <button
+            className="btn-green"
+            onClick={() => verifyToken()}
+            disabled={!token.trim() || status === 'checking'}
+            style={{ minWidth: 90 }}
+          >
             {status === 'checking'
               ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
               : 'Xác thực'}
@@ -113,15 +141,49 @@ export default function AuthCard({ onAuth }: Props) {
         </div>
       </div>
 
+      {/* Lỗi xác thực */}
       {status === 'error' && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, color: 'var(--danger)', fontSize: 12 }}>
           <XCircle size={13} /> {errorMsg}
         </div>
       )}
 
+      {/* Cảnh báo thiếu scope org */}
+      {scopeWarning && (
+        <div style={{
+          marginTop: 8, padding: '8px 10px', borderRadius: 6,
+          background: 'rgba(210,153,34,0.12)', border: '1px solid rgba(210,153,34,0.35)',
+          display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12,
+          color: 'var(--warning, #d29922)',
+        }}>
+          <AlertTriangle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>
+            {scopeWarning}
+            {' '}
+            <a
+              href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: 'var(--blue)' }}
+            >
+              Tạo token mới với đủ quyền ↗
+            </a>
+          </span>
+        </div>
+      )}
+
       <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>
-        Cần token với quyền <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>repo</code>.{' '}
-        <a href="https://github.com/settings/tokens/new?scopes=repo,admin:org&description=GH+Bulk+Creator" target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>
+        Cần token với quyền{' '}
+        <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>repo</code>
+        {' '}+{' '}
+        <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>read:org</code>
+        {' '}(nếu dùng Organization).{' '}
+        <a
+          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: 'var(--blue)' }}
+        >
           Tạo token tại đây ↗
         </a>
       </p>
