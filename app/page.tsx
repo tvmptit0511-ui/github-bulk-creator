@@ -6,7 +6,7 @@ import RepoNameBuilder from './components/RepoNameBuilder';
 import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
 import LogPanel from './components/LogPanel';
 import HistoryPanel from './components/HistoryPanel';
-import { createRepo, uploadFile } from './lib/github';
+import { createRepo, uploadFile, getUserOrgs } from './lib/github';
 import { saveHistory } from './lib/storage';
 import { CreationMode, LogItem, RepoFile } from './types';
 
@@ -18,6 +18,12 @@ export default function Home() {
   // Auth
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
+  const [userOrgs, setUserOrgs] = useState<string[]>([]);
+
+  // Owner — personal hoặc org
+  const [ownerType, setOwnerType] = useState<'personal' | 'org'>('personal');
+  const [orgName, setOrgName] = useState('');
+  const [customOrgInput, setCustomOrgInput] = useState(false);
 
   // Repo naming
   const [mode, setMode] = useState<CreationMode>('range');
@@ -33,7 +39,7 @@ export default function Home() {
   const [autoInit, setAutoInit] = useState(true);
   const [delay, setDelay] = useState(300);
 
-  // Files — shared (push to all) + per-repo
+  // Files
   const [sharedFiles, setSharedFiles] = useState<RepoFile[]>([]);
   const [repoEntries, setRepoEntries] = useState<RepoEntry[]>([]);
 
@@ -42,6 +48,8 @@ export default function Home() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [okCount, setOkCount] = useState(0);
   const [errCount, setErrCount] = useState(0);
+
+  const owner = ownerType === 'org' ? orgName.trim() : username;
 
   function getNames(): string[] {
     if (mode === 'range') {
@@ -56,7 +64,6 @@ export default function Home() {
 
   const names = getNames();
 
-  // Keep repoEntries in sync with names list
   const syncedEntries = useMemo<RepoEntry[]>(() => {
     return names.map(name => {
       const existing = repoEntries.find(e => e.name === name);
@@ -72,6 +79,7 @@ export default function Home() {
     if (running) return;
     if (!token) { alert('Hãy xác thực GitHub trước!'); return; }
     if (names.length === 0) { alert('Chưa có tên repo nào!'); return; }
+    if (ownerType === 'org' && !orgName.trim()) { alert('Hãy chọn hoặc nhập tên organization!'); return; }
     if (names.length > 100 && !confirm(`Bạn sắp tạo ${names.length} repos. Tiếp tục?`)) return;
 
     setRunning(true);
@@ -85,23 +93,22 @@ export default function Home() {
     for (const name of names) {
       updateLog(name, { status: 'running', message: 'Đang tạo repo...' });
 
-      // Files = shared + per-repo (deduplicated by name, per-repo wins)
       const perRepo = syncedEntries.find(e => e.name === name)?.files ?? [];
       const mergedFiles: RepoFile[] = [...sharedFiles];
       for (const f of perRepo) {
         if (!mergedFiles.find(x => x.name === f.name)) mergedFiles.push(f);
         else {
           const idx = mergedFiles.findIndex(x => x.name === f.name);
-          mergedFiles[idx] = f; // per-repo overrides shared
+          mergedFiles[idx] = f;
         }
       }
 
       try {
-        const repo = await createRepo(token, name, description, isPrivate, autoInit);
+        const repo = await createRepo(token, owner, name, description, isPrivate, autoInit, ownerType);
         if (mergedFiles.length > 0) {
           updateLog(name, { message: `Upload ${mergedFiles.length} file...` });
           for (const f of mergedFiles) {
-            await uploadFile(token, username, name, f);
+            await uploadFile(token, owner, name, f);
           }
         }
         updateLog(name, { status: 'ok', message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`, url: repo.html_url });
@@ -116,18 +123,46 @@ export default function Home() {
       await new Promise(r => setTimeout(r, delay));
     }
 
-    saveHistory({ id: crypto.randomUUID(), timestamp: Date.now(), username, repos: names, results });
+    saveHistory({ id: crypto.randomUUID(), timestamp: Date.now(), username: owner, repos: names, results });
     setRunning(false);
   }
 
-  const handleAuth = useCallback((t: string, u: string) => {
-    setToken(t); setUsername(u);
+  const handleAuth = useCallback(async (t: string, u: string, _avatar: string) => {
+    setToken(t);
+    setUsername(u);
+    // Reset về personal mỗi khi đổi tài khoản
+    setOwnerType('personal');
+    setOrgName('');
+    setCustomOrgInput(false);
+    // Fetch danh sách org
+    const orgs = await getUserOrgs(t);
+    setUserOrgs(orgs);
   }, []);
+
+  function handleOwnerSelect(value: string) {
+    if (value === 'personal') {
+      setOwnerType('personal');
+      setOrgName('');
+      setCustomOrgInput(false);
+    } else if (value === '__custom__') {
+      setOwnerType('org');
+      setOrgName('');
+      setCustomOrgInput(true);
+    } else {
+      setOwnerType('org');
+      setOrgName(value);
+      setCustomOrgInput(false);
+    }
+  }
+
+  const selectValue = ownerType === 'personal'
+    ? 'personal'
+    : customOrgInput ? '__custom__' : orgName;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <header style={{ borderBottom: '1px solid var(--border)', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 10 }}>
-        <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
         <span style={{ fontWeight: 700, fontSize: 15 }}>GitHub Bulk Repo Creator</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className={`tab ${tab === 'create' ? 'active' : ''}`} onClick={() => setTab('create')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -151,7 +186,7 @@ export default function Home() {
               onRangeFromChange={setRangeFrom} onRangeToChange={setRangeTo}
               manualNames={manualNames} onManualNamesChange={setManualNames}
               freeText={freeText} onFreeTextChange={setFreeText}
-              username={username}
+              username={owner}
             />
 
             {/* Repo settings */}
@@ -159,6 +194,39 @@ export default function Home() {
               <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Settings size={15} /> Cài đặt Repo
               </div>
+
+              {/* Owner selector — chỉ hiện khi đã auth */}
+              {token && (
+                <div style={{ marginBottom: 12 }}>
+                  <label>Tạo repo vào</label>
+                  <select value={selectValue} onChange={e => handleOwnerSelect(e.target.value)}>
+                    <option value="personal">👤 Cá nhân ({username})</option>
+                    {userOrgs.map(org => (
+                      <option key={org} value={org}>🏢 {org}</option>
+                    ))}
+                    <option value="__custom__">✏️ Nhập tên org khác...</option>
+                  </select>
+
+                  {/* Input thủ công nếu chọn "Nhập tay" */}
+                  {customOrgInput && (
+                    <input
+                      type="text"
+                      style={{ marginTop: 6 }}
+                      placeholder="Tên organization (VD: my-company)"
+                      value={orgName}
+                      onChange={e => setOrgName(e.target.value)}
+                    />
+                  )}
+
+                  {/* Badge xác nhận owner hiện tại */}
+                  {ownerType === 'org' && orgName && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--success, #3fb950)' }}>
+                      ✓ Repo sẽ được tạo tại github.com/<strong>{orgName}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
                 <div>
                   <label>Visibility</label>
@@ -185,7 +253,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Per-repo file manager */}
             <PerRepoFileManager
               repos={syncedEntries}
               onChange={setRepoEntries}
@@ -193,7 +260,6 @@ export default function Home() {
               onSharedChange={setSharedFiles}
             />
 
-            {/* Action */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <button
                 className="btn-green"
@@ -208,6 +274,9 @@ export default function Home() {
               </button>
               {!token && <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa xác thực</span>}
               {token && names.length === 0 && <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa có tên repo</span>}
+              {ownerType === 'org' && !orgName.trim() && (
+                <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa chọn organization</span>
+              )}
             </div>
 
             <LogPanel logs={logs} total={names.length} okCount={okCount} errCount={errCount} running={running} />
