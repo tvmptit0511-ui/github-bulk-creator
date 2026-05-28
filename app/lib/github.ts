@@ -4,12 +4,18 @@ const BASE = 'https://api.github.com';
 
 export async function createRepo(
   token: string,
+  owner: string,
   name: string,
   description: string,
   isPrivate: boolean,
-  autoInit: boolean
+  autoInit: boolean,
+  ownerType: 'personal' | 'org' = 'personal'
 ) {
-  const res = await fetch(`${BASE}/user/repos`, {
+  const url = ownerType === 'org'
+    ? `${BASE}/orgs/${owner}/repos`
+    : `${BASE}/user/repos`;
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `token ${token}`,
@@ -61,4 +67,16 @@ export async function getUser(token: string) {
   });
   if (!res.ok) throw new Error('Invalid token or unauthorized');
   return await res.json();
+}
+
+export async function getUserOrgs(token: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/user/orgs`, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.map((o: { login: string }) => o.login);
 }
