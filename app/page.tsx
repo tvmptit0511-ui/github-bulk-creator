@@ -1,9 +1,9 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Rocket, History, Settings } from 'lucide-react';
 import AuthCard from './components/AuthCard';
 import RepoNameBuilder from './components/RepoNameBuilder';
-import FileUploader from './components/FileUploader';
+import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
 import LogPanel from './components/LogPanel';
 import HistoryPanel from './components/HistoryPanel';
 import { createRepo, uploadFile } from './lib/github';
@@ -31,8 +31,11 @@ export default function Home() {
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [autoInit, setAutoInit] = useState(true);
-  const [files, setFiles] = useState<RepoFile[]>([]);
   const [delay, setDelay] = useState(300);
+
+  // Files — shared (push to all) + per-repo
+  const [sharedFiles, setSharedFiles] = useState<RepoFile[]>([]);
+  const [repoEntries, setRepoEntries] = useState<RepoEntry[]>([]);
 
   // Execution
   const [running, setRunning] = useState(false);
@@ -51,13 +54,22 @@ export default function Home() {
     return freeText.split('\n').map(s => s.trim()).filter(Boolean);
   }
 
+  const names = getNames();
+
+  // Keep repoEntries in sync with names list
+  const syncedEntries = useMemo<RepoEntry[]>(() => {
+    return names.map(name => {
+      const existing = repoEntries.find(e => e.name === name);
+      return existing ?? { name, files: [] };
+    });
+  }, [names, repoEntries]);
+
   function updateLog(name: string, partial: Partial<LogItem>) {
     setLogs(prev => prev.map(l => l.name === name ? { ...l, ...partial } : l));
   }
 
   async function start() {
     if (running) return;
-    const names = getNames();
     if (!token) { alert('Hãy xác thực GitHub trước!'); return; }
     if (names.length === 0) { alert('Chưa có tên repo nào!'); return; }
     if (names.length > 100 && !confirm(`Bạn sắp tạo ${names.length} repos. Tiếp tục?`)) return;
@@ -65,32 +77,41 @@ export default function Home() {
     setRunning(true);
     setOkCount(0);
     setErrCount(0);
-    const initial: LogItem[] = names.map(n => ({ name: n, status: 'pending', message: 'Chờ...' }));
-    setLogs(initial);
+    setLogs(names.map(n => ({ name: n, status: 'pending', message: 'Chờ...' })));
 
     let ok = 0, err = 0;
     const results: { name: string; status: 'ok' | 'err'; url?: string; error?: string }[] = [];
 
     for (const name of names) {
       updateLog(name, { status: 'running', message: 'Đang tạo repo...' });
+
+      // Files = shared + per-repo (deduplicated by name, per-repo wins)
+      const perRepo = syncedEntries.find(e => e.name === name)?.files ?? [];
+      const mergedFiles: RepoFile[] = [...sharedFiles];
+      for (const f of perRepo) {
+        if (!mergedFiles.find(x => x.name === f.name)) mergedFiles.push(f);
+        else {
+          const idx = mergedFiles.findIndex(x => x.name === f.name);
+          mergedFiles[idx] = f; // per-repo overrides shared
+        }
+      }
+
       try {
         const repo = await createRepo(token, name, description, isPrivate, autoInit);
-        if (files.length > 0) {
-          updateLog(name, { message: `Upload ${files.length} file...` });
-          for (const f of files) {
+        if (mergedFiles.length > 0) {
+          updateLog(name, { message: `Upload ${mergedFiles.length} file...` });
+          for (const f of mergedFiles) {
             await uploadFile(token, username, name, f);
           }
         }
-        updateLog(name, { status: 'ok', message: '✓ Tạo thành công', url: repo.html_url });
+        updateLog(name, { status: 'ok', message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`, url: repo.html_url });
         results.push({ name, status: 'ok', url: repo.html_url });
-        ok++;
-        setOkCount(ok);
+        ok++; setOkCount(ok);
       } catch (e) {
         const msg = (e as Error).message;
         updateLog(name, { status: 'error', message: msg });
         results.push({ name, status: 'err', error: msg });
-        err++;
-        setErrCount(err);
+        err++; setErrCount(err);
       }
       await new Promise(r => setTimeout(r, delay));
     }
@@ -100,15 +121,11 @@ export default function Home() {
   }
 
   const handleAuth = useCallback((t: string, u: string) => {
-    setToken(t);
-    setUsername(u);
+    setToken(t); setUsername(u);
   }, []);
-
-  const names = getNames();
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      {/* Header */}
       <header style={{ borderBottom: '1px solid var(--border)', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 10 }}>
         <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         <span style={{ fontWeight: 700, fontSize: 15 }}>GitHub Bulk Repo Creator</span>
@@ -124,8 +141,9 @@ export default function Home() {
 
       <main style={{ maxWidth: 800, margin: '0 auto', padding: '24px 16px' }}>
         {tab === 'create' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 0 }}>
+          <>
             <AuthCard onAuth={handleAuth} />
+
             <RepoNameBuilder
               mode={mode} onModeChange={setMode}
               baseName={baseName} onBaseNameChange={setBaseName}
@@ -162,22 +180,21 @@ export default function Home() {
                 <input type="text" value={description} onChange={e => setDescription(e.target.value)} placeholder="Auto-generated repo" />
               </div>
               <div>
-                <label>Delay giữa các request (ms) — tránh rate limit</label>
+                <label>Delay giữa các request (ms)</label>
                 <input type="number" value={delay} min={100} max={3000} step={50} onChange={e => setDelay(Number(e.target.value))} style={{ width: 120 }} />
               </div>
             </div>
 
-            {/* File upload */}
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Files đính kèm</div>
-              <p style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 12 }}>
-                Các file này sẽ được push vào <strong>tất cả</strong> repo được tạo.
-              </p>
-              <FileUploader files={files} onChange={setFiles} />
-            </div>
+            {/* Per-repo file manager */}
+            <PerRepoFileManager
+              repos={syncedEntries}
+              onChange={setRepoEntries}
+              sharedFiles={sharedFiles}
+              onSharedChange={setSharedFiles}
+            />
 
             {/* Action */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <button
                 className="btn-green"
                 onClick={start}
@@ -194,9 +211,8 @@ export default function Home() {
             </div>
 
             <LogPanel logs={logs} total={names.length} okCount={okCount} errCount={errCount} running={running} />
-          </div>
+          </>
         )}
-
         {tab === 'history' && <HistoryPanel />}
       </main>
 
