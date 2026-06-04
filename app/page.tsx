@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback, useMemo } from 'react';
-import { Rocket, History, Settings, RefreshCw } from 'lucide-react';
+import { Rocket, History, Settings, RefreshCw, GitBranch } from 'lucide-react';
 import AuthCard from './components/AuthCard';
 import RepoNameBuilder from './components/RepoNameBuilder';
 import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
@@ -15,21 +15,17 @@ type Tab = 'create' | 'history';
 export default function Home() {
   const [tab, setTab] = useState<Tab>('create');
 
-  // Auth
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
   const [userOrgs, setUserOrgs] = useState<string[]>([]);
   const [orgsLoading, setOrgsLoading] = useState(false);
 
-  // Owner — personal hoặc org
   const [ownerType, setOwnerType] = useState<'personal' | 'org'>('personal');
   const [orgName, setOrgName] = useState('');
   const [customOrgInput, setCustomOrgInput] = useState(false);
-  // Membership role của user trong org đang chọn
   const [orgRole, setOrgRole] = useState<'admin' | 'member' | 'none' | null>(null);
   const [orgRoleLoading, setOrgRoleLoading] = useState(false);
 
-  // Repo naming
   const [mode, setMode] = useState<CreationMode>('range');
   const [baseName, setBaseName] = useState('ss3_bai');
   const [rangeFrom, setRangeFrom] = useState(1);
@@ -37,17 +33,14 @@ export default function Home() {
   const [manualNames, setManualNames] = useState<string[]>(['']);
   const [freeText, setFreeText] = useState('');
 
-  // Repo settings
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [autoInit, setAutoInit] = useState(true);
   const [delay, setDelay] = useState(300);
 
-  // Files
   const [sharedFiles, setSharedFiles] = useState<RepoFile[]>([]);
   const [repoEntries, setRepoEntries] = useState<RepoEntry[]>([]);
 
-  // Execution
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [okCount, setOkCount] = useState(0);
@@ -89,7 +82,7 @@ export default function Home() {
     setRunning(true);
     setOkCount(0);
     setErrCount(0);
-    setLogs(names.map(n => ({ name: n, status: 'pending', message: 'Chờ...' })));
+    setLogs(names.map(n => ({ name: n, status: 'pending', message: 'Đang chờ...' })));
 
     let ok = 0, err = 0;
     const results: { name: string; status: 'ok' | 'err'; url?: string; error?: string }[] = [];
@@ -115,7 +108,7 @@ export default function Home() {
         }
         updateLog(name, {
           status: 'ok',
-          message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`,
+          message: `Thành công${mergedFiles.length > 0 ? ` · ${mergedFiles.length} file` : ''}`,
           url: repo.html_url,
         });
         results.push({ name, status: 'ok', url: repo.html_url });
@@ -140,14 +133,12 @@ export default function Home() {
     setOrgName('');
     setCustomOrgInput(false);
     setOrgRole(null);
-    // Fetch danh sách org
     setOrgsLoading(true);
     const orgs = await getUserOrgs(t);
     setUserOrgs(orgs);
     setOrgsLoading(false);
   }, []);
 
-  /** Kiểm tra role khi user chọn / nhập xong tên org */
   async function checkOrgRole(org: string) {
     if (!org || !token || !username) { setOrgRole(null); return; }
     setOrgRoleLoading(true);
@@ -186,52 +177,73 @@ export default function Home() {
     ? 'personal'
     : customOrgInput ? '__custom__' : orgName;
 
-  /** Badge màu cho org role */
   function orgRoleBadge() {
-    if (orgRoleLoading) return <span style={{ fontSize: 12, color: 'var(--muted)' }}>Đang kiểm tra quyền...</span>;
+    if (orgRoleLoading) return (
+      <span style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Đang kiểm tra...
+      </span>
+    );
     if (!orgRole || orgRole === 'none') return (
-      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--danger, #f85149)' }}>
+      <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--red-dim)', border: '1px solid rgba(255,77,106,0.2)', borderRadius: 8, fontSize: 12, color: 'var(--red)', display: 'flex', gap: 6, alignItems: 'center' }}>
         ⚠ Không tìm thấy membership trong org này — repo có thể không tạo được.
       </div>
     );
-    const color = orgRole === 'admin' ? 'var(--success, #3fb950)' : '#58a6ff';
-    const label = orgRole === 'admin' ? '👑 Owner/Admin' : '👤 Member';
+    const isAdmin = orgRole === 'admin';
     return (
-      <div style={{ marginTop: 6, fontSize: 12, color }}>
-        {label} tại <strong>{orgName}</strong> — repo sẽ tạo tại github.com/<strong>{orgName}</strong>
-        {orgRole === 'member' && (
-          <span style={{ color: 'var(--warning, #d29922)', marginLeft: 6 }}>
-            (cần org cho phép member tạo repo)
-          </span>
-        )}
+      <div style={{ marginTop: 8, padding: '8px 12px', background: isAdmin ? 'var(--green-dim)' : 'var(--accent-dim)', border: `1px solid ${isAdmin ? 'rgba(0,214,143,0.2)' : 'rgba(61,126,255,0.2)'}`, borderRadius: 8, fontSize: 12, color: isAdmin ? 'var(--green)' : 'var(--accent)', display: 'flex', gap: 6, alignItems: 'center' }}>
+        {isAdmin ? '👑 Owner/Admin' : '👤 Member'} · <strong>{orgName}</strong>
+        {orgRole === 'member' && <span style={{ opacity: 0.7 }}>(cần org cho phép member tạo repo)</span>}
       </div>
     );
   }
 
+  const canStart = !running && !!token && names.length > 0 && (ownerType === 'personal' || !!orgName.trim());
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <header style={{
-        borderBottom: '1px solid var(--border)', padding: '12px 24px',
-        display: 'flex', alignItems: 'center', gap: 12,
-        position: 'sticky', top: 0, background: 'var(--bg)', zIndex: 10,
-      }}>
-        <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-        </svg>
-        <span style={{ fontWeight: 700, fontSize: 15 }}>GitHub Bulk Repo Creator</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className={`tab ${tab === 'create' ? 'active' : ''}`} onClick={() => setTab('create')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Rocket size={13} /> Tạo Repo
-          </button>
-          <button className={`tab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <History size={13} /> Lịch sử
-          </button>
+      {/* Header */}
+      <header className="header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+          <div style={{ width: 32, height: 32, background: 'var(--accent-dim)', border: '1px solid var(--accent-glow)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <GitBranch size={16} color="var(--accent)" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.01em' }}>GitHub Bulk Creator</div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 400 }}>Tạo nhiều repo cùng lúc</div>
+          </div>
         </div>
+
+        <nav style={{ display: 'flex', gap: 4 }}>
+          {[
+            { id: 'create', label: 'Tạo Repo', icon: <Rocket size={13} /> },
+            { id: 'history', label: 'Lịch sử', icon: <History size={13} /> },
+          ].map(({ id, label, icon }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id as Tab)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px',
+                borderRadius: 8,
+                border: tab === id ? '1px solid var(--border2)' : '1px solid transparent',
+                background: tab === id ? 'var(--surface2)' : 'transparent',
+                color: tab === id ? 'var(--text)' : 'var(--text3)',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: tab === id ? 600 : 400,
+                fontFamily: 'inherit',
+                transition: 'all 0.18s',
+              }}
+            >
+              {icon} {label}
+            </button>
+          ))}
+        </nav>
       </header>
 
-      <main style={{ maxWidth: 800, margin: '0 auto', padding: '24px 16px' }}>
+      <main style={{ maxWidth: 820, margin: '0 auto', padding: '28px 20px 60px' }}>
         {tab === 'create' && (
-          <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <AuthCard onAuth={handleAuth} />
 
             <RepoNameBuilder
@@ -244,32 +256,29 @@ export default function Home() {
               username={owner}
             />
 
-            {/* Repo settings */}
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Settings size={15} /> Cài đặt Repo
+            {/* Settings Card */}
+            <div className="card">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+                <div style={{ width: 28, height: 28, background: 'var(--surface2)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Settings size={14} color="var(--text3)" />
+                </div>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Cài đặt Repo</span>
               </div>
 
-              {/* Owner selector — chỉ hiện khi đã auth */}
               {token && (
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                     Tạo repo vào
-                    {/* Nút refresh org list */}
                     <button
                       onClick={handleRefreshOrgs}
                       disabled={orgsLoading}
                       title="Tải lại danh sách organization"
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--muted)', padding: '0 2px', display: 'flex',
-                      }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: '0 2px', display: 'flex', lineHeight: 1 }}
                     >
-                      <RefreshCw size={12} style={orgsLoading ? { animation: 'spin 1s linear infinite' } : {}} />
+                      <RefreshCw size={11} style={orgsLoading ? { animation: 'spin 1s linear infinite' } : {}} />
                     </button>
-                    {orgsLoading && <span style={{ fontSize: 11, color: 'var(--muted)' }}>Đang tải org...</span>}
+                    {orgsLoading && <span style={{ fontSize: 11, color: 'var(--text3)' }}>Đang tải...</span>}
                   </label>
-
                   <select value={selectValue} onChange={e => handleOwnerSelect(e.target.value)}>
                     <option value="personal">👤 Cá nhân ({username})</option>
                     {userOrgs.length > 0 && (
@@ -281,26 +290,21 @@ export default function Home() {
                     )}
                     <option value="__custom__">✏️ Nhập tên org khác...</option>
                   </select>
-
                   {userOrgs.length === 0 && !orgsLoading && (
-                    <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                      Không tìm thấy org nào. Token có thể thiếu quyền <code style={{ background: 'var(--surface2)', padding: '1px 3px', borderRadius: 2 }}>read:org</code>.
+                    <p style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
+                      Không tìm thấy org. Token có thể thiếu quyền <code>read:org</code>.
                     </p>
                   )}
-
-                  {/* Input thủ công nếu chọn "Nhập tay" */}
                   {customOrgInput && (
                     <input
                       type="text"
-                      style={{ marginTop: 6 }}
+                      style={{ marginTop: 8 }}
                       placeholder="Tên organization (VD: my-company)"
                       value={orgName}
                       onChange={e => setOrgName(e.target.value)}
                       onBlur={() => checkOrgRole(orgName)}
                     />
                   )}
-
-                  {/* Badge trạng thái org */}
                   {ownerType === 'org' && orgName && orgRoleBadge()}
                 </div>
               )}
@@ -309,25 +313,39 @@ export default function Home() {
                 <div>
                   <label>Visibility</label>
                   <select value={isPrivate ? 'private' : 'public'} onChange={e => setIsPrivate(e.target.value === 'private')}>
-                    <option value="public">Public</option>
-                    <option value="private">Private</option>
+                    <option value="public">🌐 Public</option>
+                    <option value="private">🔒 Private</option>
                   </select>
                 </div>
                 <div>
                   <label>README tự động</label>
                   <select value={autoInit ? 'yes' : 'no'} onChange={e => setAutoInit(e.target.value === 'yes')}>
-                    <option value="yes">Có</option>
-                    <option value="no">Không</option>
+                    <option value="yes">✅ Có</option>
+                    <option value="no">⬜ Không</option>
                   </select>
                 </div>
               </div>
+
               <div style={{ marginBottom: 12 }}>
                 <label>Mô tả (tuỳ chọn)</label>
                 <input type="text" value={description} onChange={e => setDescription(e.target.value)} placeholder="Auto-generated repo" />
               </div>
-              <div>
-                <label>Delay giữa các request (ms)</label>
-                <input type="number" value={delay} min={100} max={3000} step={50} onChange={e => setDelay(Number(e.target.value))} style={{ width: 120 }} />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label>Delay giữa requests (ms)</label>
+                  <input
+                    type="number" value={delay} min={100} max={3000} step={50}
+                    onChange={e => setDelay(Number(e.target.value))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Ước tính thời gian</label>
+                  <div style={{ padding: '9px 14px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13, color: 'var(--text2)', fontFamily: "'JetBrains Mono', monospace" }}>
+                    ~{names.length > 0 ? Math.ceil((names.length * delay) / 1000) : 0}s
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -338,32 +356,50 @@ export default function Home() {
               onSharedChange={setSharedFiles}
             />
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            {/* Action Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', position: 'sticky', bottom: 20, backdropFilter: 'blur(20px)' }}>
               <button
                 className="btn-green"
                 onClick={start}
-                disabled={running || !token || names.length === 0}
-                style={{ padding: '8px 20px', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}
+                disabled={!canStart}
+                style={{ padding: '11px 28px', fontSize: 15 }}
               >
                 {running
-                  ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Đang tạo...</>
+                  ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block', fontSize: 16 }}>⟳</span> Đang tạo...</>
                   : <><Rocket size={16} /> Tạo {names.length > 0 ? `${names.length} ` : ''}Repo</>
                 }
               </button>
-              {!token && <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa xác thực</span>}
-              {token && names.length === 0 && <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa có tên repo</span>}
-              {ownerType === 'org' && !orgName.trim() && (
-                <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa chọn organization</span>
-              )}
+
+              <div style={{ flex: 1, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {!token && (
+                  <span style={{ fontSize: 12, color: 'var(--yellow)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    ⚠ Chưa xác thực GitHub
+                  </span>
+                )}
+                {token && names.length === 0 && (
+                  <span style={{ fontSize: 12, color: 'var(--yellow)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    ⚠ Chưa có tên repo
+                  </span>
+                )}
+                {ownerType === 'org' && !orgName.trim() && (
+                  <span style={{ fontSize: 12, color: 'var(--yellow)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    ⚠ Chưa chọn organization
+                  </span>
+                )}
+                {canStart && !running && (
+                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: "'JetBrains Mono', monospace" }}>
+                    {names.length} repo · ~{Math.ceil((names.length * delay) / 1000)}s
+                  </span>
+                )}
+              </div>
             </div>
 
             <LogPanel logs={logs} total={names.length} okCount={okCount} errCount={errCount} running={running} />
-          </>
+          </div>
         )}
+
         {tab === 'history' && <HistoryPanel />}
       </main>
-
-      <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
     </div>
   );
 }

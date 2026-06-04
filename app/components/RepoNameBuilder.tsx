@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Hash, List, AlignLeft } from 'lucide-react';
 import { CreationMode } from '@/app/types';
 
 interface Props {
@@ -18,6 +18,12 @@ interface Props {
   onFreeTextChange: (v: string) => void;
   username: string;
 }
+
+const MODES: { id: CreationMode; label: string; icon: React.ReactNode; desc: string }[] = [
+  { id: 'range', label: 'Dãy số', icon: <Hash size={13} />, desc: 'VD: repo1, repo2, ...' },
+  { id: 'manual', label: 'Nhập tay', icon: <List size={13} />, desc: 'Thêm từng tên' },
+  { id: 'free', label: 'Tự do', icon: <AlignLeft size={13} />, desc: 'Dán danh sách' },
+];
 
 export default function RepoNameBuilder({
   mode, onModeChange, baseName, onBaseNameChange,
@@ -39,8 +45,8 @@ export default function RepoNameBuilder({
 
   const names = getPreviewNames();
   const count = names.length;
-  const preview = names.slice(0, 6);
-  const rest = count - 6;
+  const preview = names.slice(0, 5);
+  const rest = count - 5;
 
   function updateManual(idx: number, val: string) {
     const copy = [...manualNames];
@@ -49,71 +55,125 @@ export default function RepoNameBuilder({
   }
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12 }}>Tên Repo</div>
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>Tên Repo</div>
+        {count > 0 && (
+          <span style={{ padding: '3px 10px', background: 'var(--accent-dim)', border: '1px solid rgba(61,126,255,0.2)', borderRadius: 100, fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: "'JetBrains Mono', monospace" }}>
+            {count} repo
+          </span>
+        )}
+      </div>
 
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
-        {([['range', 'Dãy số'], ['manual', 'Nhập tay'], ['free', 'Tự do']] as [CreationMode, string][]).map(([m, label]) => (
-          <button key={m} className={`tab ${mode === m ? 'active' : ''}`} onClick={() => onModeChange(m)}>{label}</button>
+      {/* Mode selector */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, padding: 4, background: 'var(--bg2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+        {MODES.map(({ id, label, icon }) => (
+          <button
+            key={id}
+            onClick={() => onModeChange(id)}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              padding: '8px 12px',
+              borderRadius: 7,
+              border: 'none',
+              background: mode === id ? 'var(--surface2)' : 'transparent',
+              color: mode === id ? 'var(--text)' : 'var(--text3)',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: mode === id ? 600 : 400,
+              fontFamily: 'inherit',
+              transition: 'all 0.18s',
+              boxShadow: mode === id ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+            }}
+          >
+            {icon} {label}
+          </button>
         ))}
       </div>
 
+      {/* Range mode */}
       {mode === 'range' && (
-        <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 8, alignItems: 'end', marginBottom: 12 }}>
-            <div>
-              <label>Tên cơ sở</label>
-              <input type="text" value={baseName} onChange={e => onBaseNameChange(e.target.value)} placeholder="ss3_bai" />
-            </div>
-            <div>
-              <label>Từ</label>
-              <input type="number" value={rangeFrom} min={0} onChange={e => onRangeFromChange(Number(e.target.value))} style={{ width: 72 }} />
-            </div>
-            <div>
-              <label>Đến</label>
-              <input type="number" value={rangeTo} min={0} onChange={e => onRangeToChange(Number(e.target.value))} style={{ width: 72 }} />
-            </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 100px', gap: 10 }}>
+          <div>
+            <label>Tên cơ sở</label>
+            <input type="text" value={baseName} onChange={e => onBaseNameChange(e.target.value)} placeholder="ss3_bai" />
+          </div>
+          <div>
+            <label>Từ</label>
+            <input type="number" value={rangeFrom} min={0} onChange={e => onRangeFromChange(Number(e.target.value))} />
+          </div>
+          <div>
+            <label>Đến</label>
+            <input type="number" value={rangeTo} min={0} onChange={e => onRangeToChange(Number(e.target.value))} />
           </div>
         </div>
       )}
 
+      {/* Manual mode */}
       {mode === 'manual' && (
         <div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
             {manualNames.map((n, i) => (
-              <div key={i} style={{ display: 'flex', gap: 6 }}>
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--text3)', minWidth: 20, textAlign: 'right' }}>{i + 1}</span>
                 <input type="text" value={n} onChange={e => updateManual(i, e.target.value)} placeholder={`repo-${i + 1}`} />
-                <button className="btn-ghost" onClick={() => onManualNamesChange(manualNames.filter((_, j) => j !== i))} style={{ padding: '5px 10px', flexShrink: 0 }}>
-                  <X size={14} />
+                <button
+                  onClick={() => onManualNamesChange(manualNames.filter((_, j) => j !== i))}
+                  style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer', color: 'var(--text3)', display: 'flex', padding: 6, flexShrink: 0, transition: 'all 0.15s' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--red)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,77,106,0.3)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text3)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; }}
+                >
+                  <X size={12} />
                 </button>
               </div>
             ))}
           </div>
-          <button className="btn-ghost" onClick={() => onManualNamesChange([...manualNames, ''])} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            className="btn-ghost"
+            onClick={() => onManualNamesChange([...manualNames, ''])}
+            style={{ fontSize: 12, width: '100%', justifyContent: 'center' }}
+          >
             <Plus size={13} /> Thêm repo
           </button>
         </div>
       )}
 
+      {/* Free mode */}
       {mode === 'free' && (
         <div>
           <label>Mỗi dòng là một tên repo</label>
-          <textarea value={freeText} onChange={e => onFreeTextChange(e.target.value)} placeholder={"ss3_bai1\nss3_bai2\nproject_final\nhomework_03"} style={{ minHeight: 120, fontFamily: 'monospace', fontSize: 13 }} />
+          <textarea
+            value={freeText}
+            onChange={e => onFreeTextChange(e.target.value)}
+            placeholder={"ss3_bai1\nss3_bai2\nproject_final\nhomework_03"}
+            style={{ minHeight: 130, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.7 }}
+          />
         </div>
       )}
 
+      {/* Preview */}
       {count > 0 && (
-        <div style={{ marginTop: 12, background: 'var(--surface2)', borderRadius: 6, padding: '10px 12px', border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-            Sẽ tạo <strong style={{ color: 'var(--text)' }}>{count}</strong> repo:
+        <div style={{ marginTop: 14, background: 'var(--bg2)', borderRadius: 10, padding: '12px 14px', border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text3)', marginBottom: 8 }}>
+            Xem trước
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {preview.map(n => (
-              <span key={n} style={{ fontFamily: 'monospace', fontSize: 12, color: '#79c0ff' }}>
-                https://github.com/{username || 'username'}/{n}
-              </span>
+              <div key={n} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: 'var(--text3)', fontSize: 10 }}>github.com/</span>
+                <span style={{ color: 'var(--text3)' }}>{username || 'username'}/</span>
+                <span style={{ color: 'var(--accent)', fontWeight: 500 }}>{n}</span>
+              </div>
             ))}
-            {rest > 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>... và {rest} repo nữa</span>}
+            {rest > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2, fontStyle: 'italic' }}>
+                ... và {rest} repo nữa
+              </div>
+            )}
           </div>
         </div>
       )}

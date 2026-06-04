@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Eye, EyeOff, CheckCircle, XCircle, Loader, AlertTriangle } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle, XCircle, Loader, AlertTriangle, Key } from 'lucide-react';
 import { getUser, getTokenScopes, hasOrgScope } from '@/app/lib/github';
 import { saveToken, getToken, saveUsername, getUsername } from '@/app/lib/storage';
 
@@ -15,7 +15,6 @@ export default function AuthCard({ onAuth }: Props) {
   const [status, setStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [userInfo, setUserInfo] = useState<{ login: string; avatar_url: string } | null>(null);
-  // Scope warnings
   const [scopeWarning, setScopeWarning] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,7 +34,6 @@ export default function AuthCard({ onAuth }: Props) {
     setScopeWarning(null);
 
     try {
-      // Fetch user info và scopes song song
       const [user, scopes] = await Promise.all([
         getUser(t.trim()),
         getTokenScopes(t.trim()),
@@ -48,11 +46,10 @@ export default function AuthCard({ onAuth }: Props) {
       saveUsername(user.login);
       onAuth(t.trim(), user.login, user.avatar_url);
 
-      // Kiểm tra scope org
       if (!hasOrgScope(scopes)) {
         setScopeWarning(
           `Token thiếu quyền org (hiện có: ${scopes.length ? scopes.join(', ') : 'không xác định'}). ` +
-          `Bạn vẫn tạo được repo cá nhân, nhưng cần thêm scope "read:org" hoặc "admin:org" để tạo repo trong Organization.`
+          `Vẫn tạo được repo cá nhân, nhưng cần thêm scope "read:org" để tạo repo trong Organization.`
         );
       }
     } catch (e) {
@@ -70,125 +67,122 @@ export default function AuthCard({ onAuth }: Props) {
     }
   }
 
+  const isOk = status === 'ok';
+
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <svg height="20" width="20" viewBox="0 0 16 16" fill="var(--text)">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-        </svg>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>Xác thực GitHub</span>
-        {status === 'ok' && userInfo && (
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#2ea043' }}>
-            <img src={userInfo.avatar_url} alt="" style={{ width: 20, height: 20, borderRadius: '50%' }} />
-            @{userInfo.login}
-            <CheckCircle size={14} />
-          </span>
+    <div className="card" style={{ borderColor: isOk ? 'rgba(0,214,143,0.2)' : undefined }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+        <div style={{
+          width: 28, height: 28,
+          background: isOk ? 'var(--green-dim)' : 'var(--surface2)',
+          border: `1px solid ${isOk ? 'rgba(0,214,143,0.3)' : 'var(--border)'}`,
+          borderRadius: 7,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all 0.3s',
+        }}>
+          <Key size={13} color={isOk ? 'var(--green)' : 'var(--text3)'} />
+        </div>
+
+        <span style={{ fontWeight: 600, fontSize: 15, flex: 1 }}>Xác thực GitHub</span>
+
+        {isOk && userInfo && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', background: 'var(--green-dim)', border: '1px solid rgba(0,214,143,0.2)', borderRadius: 100 }}>
+            <img src={userInfo.avatar_url} alt="" style={{ width: 18, height: 18, borderRadius: '50%' }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)' }}>@{userInfo.login}</span>
+            <CheckCircle size={12} color="var(--green)" />
+          </div>
         )}
       </div>
 
-      {/* Row 1: Username */}
-      <div style={{ marginBottom: 10 }}>
-        <label>GitHub Username</label>
-        <input
-          type="text"
-          value={username}
-          onChange={e => handleUsernameChange(e.target.value)}
-          placeholder="IT-205-PYTHON"
-        />
-        <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>
-          VD: <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>
-            https://github.com/<strong style={{ color: '#79c0ff' }}>{username || 'IT-205-PYTHON'}</strong>/
-          </code>
-          &nbsp;— tự động điền khi xác thực token
-        </p>
-      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        {/* Username */}
+        <div>
+          <label>GitHub Username</label>
+          <input
+            type="text"
+            value={username}
+            onChange={e => handleUsernameChange(e.target.value)}
+            placeholder="my-username"
+          />
+          <p style={{ color: 'var(--text3)', fontSize: 11, marginTop: 5 }}>
+            Tự động điền khi xác thực token
+          </p>
+        </div>
 
-      {/* Row 2: Token */}
-      <div style={{ marginBottom: 8 }}>
-        <label>Personal Access Token</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ position: 'relative', flex: 1 }}>
+        {/* Token */}
+        <div>
+          <label>Personal Access Token</label>
+          <div style={{ position: 'relative' }}>
             <input
               type={show ? 'text' : 'password'}
               value={token}
               onChange={e => { setToken(e.target.value); setStatus('idle'); setScopeWarning(null); }}
-              placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-              style={{ paddingRight: 36 }}
+              placeholder="ghp_xxxxxxxxxxxx"
+              style={{ paddingRight: 38 }}
               onKeyDown={e => e.key === 'Enter' && verifyToken()}
             />
             <button
               onClick={() => setShow(v => !v)}
               style={{
-                position: 'absolute', right: 8, top: '50%',
+                position: 'absolute', right: 10, top: '50%',
                 transform: 'translateY(-50%)', background: 'none',
-                border: 'none', cursor: 'pointer', color: 'var(--muted)',
-                padding: 0, display: 'flex',
+                border: 'none', cursor: 'pointer', color: 'var(--text3)',
+                padding: 0, display: 'flex', transition: 'color 0.15s',
               }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--text)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--text3)')}
             >
-              {show ? <EyeOff size={15} /> : <Eye size={15} />}
+              {show ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <button
-            className="btn-green"
-            onClick={() => verifyToken()}
-            disabled={!token.trim() || status === 'checking'}
-            style={{ minWidth: 90 }}
-          >
-            {status === 'checking'
-              ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
-              : 'Xác thực'}
-          </button>
         </div>
       </div>
 
-      {/* Lỗi xác thực */}
+      {/* Verify button + status */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: status !== 'idle' || scopeWarning ? 12 : 0 }}>
+        <button
+          className="btn-blue"
+          onClick={() => verifyToken()}
+          disabled={!token.trim() || status === 'checking'}
+          style={{ minWidth: 110 }}
+        >
+          {status === 'checking'
+            ? <><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Đang kiểm tra</>
+            : status === 'ok' ? <><CheckCircle size={13} /> Đã xác thực</> : 'Xác thực'}
+        </button>
+
+        <span style={{ fontSize: 12, color: 'var(--text3)' }}>
+          Cần quyền <code>repo</code> + <code>read:org</code> ·{' '}
+          <a
+            href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Tạo token ↗
+          </a>
+        </span>
+      </div>
+
+      {/* Error */}
       {status === 'error' && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, color: 'var(--danger)', fontSize: 12 }}>
-          <XCircle size={13} /> {errorMsg}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', background: 'var(--red-dim)', border: '1px solid rgba(255,77,106,0.2)', borderRadius: 8, fontSize: 12, color: 'var(--red)' }}>
+          <XCircle size={13} style={{ flexShrink: 0 }} /> {errorMsg}
         </div>
       )}
 
-      {/* Cảnh báo thiếu scope org */}
+      {/* Scope warning */}
       {scopeWarning && (
-        <div style={{
-          marginTop: 8, padding: '8px 10px', borderRadius: 6,
-          background: 'rgba(210,153,34,0.12)', border: '1px solid rgba(210,153,34,0.35)',
-          display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12,
-          color: 'var(--warning, #d29922)',
-        }}>
+        <div style={{ padding: '10px 12px', background: 'var(--yellow-dim)', border: '1px solid rgba(245,197,66,0.2)', borderRadius: 8, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--yellow)' }}>
           <AlertTriangle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
           <span>
-            {scopeWarning}
-            {' '}
-            <a
-              href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator"
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: 'var(--blue)' }}
-            >
-              Tạo token mới với đủ quyền ↗
+            {scopeWarning}{' '}
+            <a href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator" target="_blank" rel="noreferrer">
+              Tạo token mới ↗
             </a>
           </span>
         </div>
       )}
-
-      <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>
-        Cần token với quyền{' '}
-        <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>repo</code>
-        {' '}+{' '}
-        <code style={{ background: 'var(--surface2)', padding: '1px 4px', borderRadius: 3 }}>read:org</code>
-        {' '}(nếu dùng Organization).{' '}
-        <a
-          href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator"
-          target="_blank"
-          rel="noreferrer"
-          style={{ color: 'var(--blue)' }}
-        >
-          Tạo token tại đây ↗
-        </a>
-      </p>
-
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
