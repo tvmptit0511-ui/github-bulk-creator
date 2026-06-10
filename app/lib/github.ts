@@ -226,3 +226,148 @@ export async function transferRepo(
   }
   return data;
 }
+
+// ─── File Management ──────────────────────────────────────────────────────────
+
+export interface RepoContentItem {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  type: 'file' | 'dir' | 'symlink' | 'submodule';
+  download_url: string | null;
+}
+
+/** List files/dirs at a given path inside a repo */
+export async function listRepoContents(
+  token: string,
+  owner: string,
+  repo: string,
+  path = ''
+): Promise<RepoContentItem[]> {
+  const url = path
+    ? `${BASE}/repos/${owner}/${repo}/contents/${path}`
+    : `${BASE}/repos/${owner}/${repo}/contents`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || 'Không thể lấy danh sách file');
+  }
+  const data = await res.json();
+  // GitHub returns a single object when path is a file
+  return Array.isArray(data) ? data : [data];
+}
+
+/** Upload or overwrite a single file (upsert) */
+export async function upsertFile(
+  token: string,
+  owner: string,
+  repo: string,
+  file: RepoFile,
+  branch?: string
+): Promise<void> {
+  const encodedPath = file.name.split('/').map(encodeURIComponent).join('/');
+  const url = `${BASE}/repos/${owner}/${repo}/contents/${encodedPath}`;
+
+  // Check if file exists to get SHA (needed for update)
+  let sha: string | undefined;
+  try {
+    const check = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    });
+    if (check.ok) {
+      const existing = await check.json();
+      sha = existing.sha;
+    }
+  } catch {
+    // file does not exist — that's fine
+  }
+
+  const body: Record<string, unknown> = {
+    message: sha ? `Update ${file.name}` : `Add ${file.name}`,
+    content: file.content,
+  };
+  if (sha) body.sha = sha;
+  if (branch) body.branch = branch;
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `token ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/vnd.github.v3+json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `Không thể upload ${file.name}`);
+  }
+}
+
+/** Delete a single file by path */
+export async function deleteRepoFile(
+  token: string,
+  owner: string,
+  repo: string,
+  filePath: string,
+  sha: string,
+  branch?: string
+): Promise<void> {
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  const body: Record<string, unknown> = {
+    message: `Delete ${filePath}`,
+    sha,
+  };
+  if (branch) body.branch = branch;
+
+  const res = await fetch(`${BASE}/repos/${owner}/${repo}/contents/${encodedPath}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `token ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/vnd.github.v3+json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message || `Không thể xoá ${filePath}`);
+  }
+}
+
+/** Replace ALL files in repo: delete everything then upload new files */
+export async function replaceAllRepoFiles(
+  token: string,
+  owner: string,
+  repo: string,
+  newFiles: RepoFile[],
+  branch?: string,
+  onProgress?: (msg: string) => void
+): Promise<void> {
+  // 1. List existing files
+  onProgress?.('Đang lấy danh sách file hiện tại...');
+  const existing = await listRepoContents(token, owner, repo);
+  const existingFiles = existing.filter(item => item.type === 'file');
+
+  // 2. Delete all existing files
+  for (const f of existingFiles) {
+    onProgress?.(`Xoá ${f.name}...`);
+    await deleteRepoFile(token, owner, repo, f.path, f.sha, branch);
+  }
+
+  // 3. Upload new files
+  for (const f of newFiles) {
+    onProgress?.(`Upload ${f.name}...`);
+    await upsertFile(token, owner, repo, f, branch);
+  }
+}

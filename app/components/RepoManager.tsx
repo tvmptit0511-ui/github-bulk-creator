@@ -4,10 +4,11 @@ import {
   Search, RefreshCw, Trash2, Edit3, ArrowRight, Lock, Unlock,
   CheckSquare, Square, Loader, CheckCircle, XCircle, Clock,
   AlertTriangle, GitBranch, ChevronDown, ChevronUp, Filter,
-  Building2, User, ChevronRight,
+  Building2, User, ChevronRight, FilePlus,
 } from 'lucide-react';
 import { listUserRepos, listOrgRepos, listUserOrgs, updateRepo, deleteRepo, transferRepo, RepoInfo, OrgInfo } from '@/app/lib/github';
 import { LogItem } from '@/app/types';
+import RepoFileUpdater from './RepoFileUpdater';
 
 interface Props {
   token: string;
@@ -37,19 +38,19 @@ const ACTION_LABELS: Record<BulkAction, string> = {
   description: '📝 Cập nhật mô tả',
 };
 
-// Owner = personal username hoặc org login
-type OwnerMode = 'personal' | string; // string = org login
+type OwnerMode = 'personal' | string;
+
+// Sub-tab inside Manage
+type ManageTab = 'bulk' | 'files';
 
 export default function RepoManager({ token, username }: Props) {
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
 
-  // Org selector
   const [orgs, setOrgs] = useState<OrgInfo[]>([]);
   const [orgsLoading, setOrgsLoading] = useState(false);
   const [ownerMode, setOwnerMode] = useState<OwnerMode>('personal');
-  const [orgSelectorOpen, setOrgSelectorOpen] = useState(false);
 
   const [filter, setFilter] = useState('');
   const [filterPrivate, setFilterPrivate] = useState<'all' | 'public' | 'private'>('all');
@@ -65,10 +66,11 @@ export default function RepoManager({ token, username }: Props) {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
 
-  // Effective owner for API calls
+  // Sub-tab: bulk actions OR file update
+  const [manageTab, setManageTab] = useState<ManageTab>('bulk');
+
   const effectiveOwner = ownerMode === 'personal' ? username : ownerMode;
 
-  // Load orgs on mount / token change
   useEffect(() => {
     if (!token) return;
     setOrgsLoading(true);
@@ -108,7 +110,6 @@ export default function RepoManager({ token, username }: Props) {
     }
   }, [token, page, ownerMode]);
 
-  // Reload when owner switches
   useEffect(() => {
     if (token) {
       setSelected(new Set());
@@ -230,8 +231,8 @@ export default function RepoManager({ token, username }: Props) {
 
   const isRenameAction = ['rename_prefix', 'rename_suffix', 'rename_replace'].includes(actionType);
   const selectedList = filtered.filter(r => selected.has(r.name));
-
   const currentOrgInfo = ownerMode !== 'personal' ? orgs.find(o => o.login === ownerMode) : null;
+  const selectedRepoNames = [...selected];
 
   if (!token) {
     return (
@@ -251,28 +252,23 @@ export default function RepoManager({ token, username }: Props) {
             Xem repo của
           </span>
 
-          {/* Personal button */}
           <button
-            onClick={() => { setOwnerMode('personal'); setOrgSelectorOpen(false); }}
+            onClick={() => { setOwnerMode('personal'); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 7,
-              padding: '6px 14px',
-              borderRadius: 8,
+              padding: '6px 14px', borderRadius: 8,
               border: `1px solid ${ownerMode === 'personal' ? 'var(--accent)' : 'var(--border)'}`,
               background: ownerMode === 'personal' ? 'var(--accent-dim)' : 'var(--surface2)',
               color: ownerMode === 'personal' ? 'var(--accent)' : 'var(--text2)',
-              cursor: 'pointer',
-              fontSize: 13,
+              cursor: 'pointer', fontSize: 13,
               fontWeight: ownerMode === 'personal' ? 600 : 400,
-              transition: 'all 0.15s',
-              fontFamily: 'inherit',
+              transition: 'all 0.15s', fontFamily: 'inherit',
             }}
           >
             <User size={13} />
             <span>@{username || 'cá nhân'}</span>
           </button>
 
-          {/* Org buttons / loading */}
           {orgsLoading ? (
             <span style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 5 }}>
               <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> Đang tải tổ chức...
@@ -285,20 +281,17 @@ export default function RepoManager({ token, username }: Props) {
             orgs.map(org => (
               <button
                 key={org.login}
-                onClick={() => { setOwnerMode(org.login); setOrgSelectorOpen(false); }}
+                onClick={() => { setOwnerMode(org.login); }}
                 title={org.description || org.login}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
-                  padding: '6px 14px',
-                  borderRadius: 8,
+                  padding: '6px 14px', borderRadius: 8,
                   border: `1px solid ${ownerMode === org.login ? 'var(--accent)' : 'var(--border)'}`,
                   background: ownerMode === org.login ? 'var(--accent-dim)' : 'var(--surface2)',
                   color: ownerMode === org.login ? 'var(--accent)' : 'var(--text2)',
-                  cursor: 'pointer',
-                  fontSize: 13,
+                  cursor: 'pointer', fontSize: 13,
                   fontWeight: ownerMode === org.login ? 600 : 400,
-                  transition: 'all 0.15s',
-                  fontFamily: 'inherit',
+                  transition: 'all 0.15s', fontFamily: 'inherit',
                 }}
               >
                 {org.avatar_url ? (
@@ -312,15 +305,12 @@ export default function RepoManager({ token, username }: Props) {
           )}
         </div>
 
-        {/* Current context badge */}
         {ownerMode !== 'personal' && (
           <div style={{
             marginTop: 10, padding: '7px 12px',
             background: 'rgba(61,126,255,0.07)',
             border: '1px solid rgba(61,126,255,0.18)',
-            borderRadius: 7,
-            fontSize: 12,
-            color: 'var(--text2)',
+            borderRadius: 7, fontSize: 12, color: 'var(--text2)',
             display: 'flex', alignItems: 'center', gap: 8,
           }}>
             <Building2 size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
@@ -385,15 +375,14 @@ export default function RepoManager({ token, username }: Props) {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 12, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 12, alignItems: 'start' }}>
         {/* Repo list */}
         <div>
           {filtered.length > 0 && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
               background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: '6px 6px 0 0', borderBottom: 'none',
-              fontSize: 12,
+              borderRadius: '6px 6px 0 0', borderBottom: 'none', fontSize: 12,
             }}>
               <button onClick={selectAll} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', display: 'flex', padding: 0 }}>
                 {selected.size === filtered.length && filtered.length > 0
@@ -415,9 +404,7 @@ export default function RepoManager({ token, username }: Props) {
           <div style={{
             border: '1px solid var(--border)',
             borderRadius: filtered.length > 0 ? '0 0 6px 6px' : 6,
-            overflow: 'hidden',
-            maxHeight: 480,
-            overflowY: 'auto',
+            overflow: 'hidden', maxHeight: 480, overflowY: 'auto',
           }}>
             {loading && repos.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
@@ -431,7 +418,7 @@ export default function RepoManager({ token, username }: Props) {
             ) : (
               filtered.map((repo, i) => {
                 const isSel = selected.has(repo.name);
-                const newName = isRenameAction ? previewNewName(repo.name) : null;
+                const newName = isRenameAction && manageTab === 'bulk' ? previewNewName(repo.name) : null;
                 const nameChanged = newName !== null && newName !== repo.name;
                 return (
                   <div
@@ -442,8 +429,7 @@ export default function RepoManager({ token, username }: Props) {
                       padding: '9px 12px',
                       borderBottom: i < filtered.length - 1 ? '1px solid var(--surface2)' : 'none',
                       background: isSel ? 'rgba(31,111,235,0.08)' : 'var(--surface)',
-                      cursor: 'pointer',
-                      transition: 'background 0.1s',
+                      cursor: 'pointer', transition: 'background 0.1s',
                     }}
                   >
                     <span style={{ color: isSel ? 'var(--blue)' : 'var(--muted)', flexShrink: 0 }}>
@@ -478,148 +464,199 @@ export default function RepoManager({ token, username }: Props) {
           </div>
         </div>
 
-        {/* Action panel */}
+        {/* Right panel with sub-tabs */}
         <div>
-          <div className="card" style={{ marginBottom: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>⚡ Hành động hàng loạt</div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label>Loại hành động</label>
-              <select
-                value={actionType}
-                onChange={e => {
-                  const t = e.target.value as BulkAction;
-                  setActionType(t);
-                  setActionCfg({ type: t });
-                  setConfirmDelete(false);
-                }}
-              >
-                {(Object.keys(ACTION_LABELS) as BulkAction[]).map(k => (
-                  <option key={k} value={k}>{ACTION_LABELS[k]}</option>
-                ))}
-              </select>
-            </div>
-
-            {actionType === 'rename_prefix' && (
-              <div style={{ marginBottom: 12 }}>
-                <label>Tiền tố thêm vào đầu</label>
-                <input type="text" placeholder="vd: 2024_" value={actionCfg.prefix ?? ''} onChange={e => setActionCfg(c => ({ ...c, prefix: e.target.value }))} />
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  vd: <code>2024_</code> + <code>my-repo</code> = <code style={{ color: '#2ea043' }}>2024_my-repo</code>
-                </p>
-              </div>
-            )}
-
-            {actionType === 'rename_suffix' && (
-              <div style={{ marginBottom: 12 }}>
-                <label>Hậu tố thêm vào cuối</label>
-                <input type="text" placeholder="vd: _archive" value={actionCfg.suffix ?? ''} onChange={e => setActionCfg(c => ({ ...c, suffix: e.target.value }))} />
-              </div>
-            )}
-
-            {actionType === 'rename_replace' && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ marginBottom: 8 }}>
-                  <label>Tìm chuỗi</label>
-                  <input type="text" placeholder="vd: ss3_" value={actionCfg.findStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, findStr: e.target.value }))} />
-                </div>
-                <div>
-                  <label>Thay bằng</label>
-                  <input type="text" placeholder="vd: lab_ (để trống = xoá)" value={actionCfg.replaceStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, replaceStr: e.target.value }))} />
-                </div>
-              </div>
-            )}
-
-            {actionType === 'transfer' && (
-              <div style={{ marginBottom: 12 }}>
-                <label>Owner mới (username hoặc org)</label>
-                <input type="text" placeholder="vd: my-organization" value={actionCfg.newOwner ?? ''} onChange={e => setActionCfg(c => ({ ...c, newOwner: e.target.value }))} />
-                <p style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>⚠ Owner mới phải có quyền nhận repo</p>
-              </div>
-            )}
-
-            {actionType === 'visibility' && (
-              <div style={{ marginBottom: 12 }}>
-                <label>Đổi thành</label>
-                <select value={actionCfg.makePrivate ? 'private' : 'public'} onChange={e => setActionCfg(c => ({ ...c, makePrivate: e.target.value === 'private' }))}>
-                  <option value="public">Public</option>
-                  <option value="private">Private</option>
-                </select>
-              </div>
-            )}
-
-            {actionType === 'description' && (
-              <div style={{ marginBottom: 12 }}>
-                <label>Mô tả mới</label>
-                <input type="text" placeholder="Mô tả repo..." value={actionCfg.description ?? ''} onChange={e => setActionCfg(c => ({ ...c, description: e.target.value }))} />
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Áp dụng cho tất cả repo đã chọn</p>
-              </div>
-            )}
-
-            {actionType === 'delete' && (
-              <div style={{ padding: '8px 10px', background: 'rgba(218,54,51,0.1)', border: '1px solid var(--danger)', borderRadius: 5, marginBottom: 12, fontSize: 12 }}>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--danger)', fontWeight: 600 }}>
-                  <AlertTriangle size={13} /> Không thể hoàn tác!
-                </div>
-                <div style={{ color: 'var(--muted)', marginTop: 4 }}>Repo bị xoá sẽ mất vĩnh viễn cùng toàn bộ code và issues.</div>
-              </div>
-            )}
-
-            {confirmDelete && (
-              <div style={{ padding: '10px', background: 'rgba(218,54,51,0.15)', border: '1px solid var(--danger)', borderRadius: 5, marginBottom: 12, fontSize: 12 }}>
-                <p style={{ color: 'var(--danger)', fontWeight: 600, marginBottom: 8 }}>
-                  Xác nhận {actionType === 'delete' ? 'xoá' : 'chuyển'} {selected.size} repo?
-                </p>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={execute} style={{ background: 'var(--danger)', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
-                    Xác nhận
-                  </button>
-                  <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setConfirmDelete(false)}>Huỷ</button>
-                </div>
-              </div>
-            )}
-
+          {/* Sub-tab switcher */}
+          <div style={{
+            display: 'flex', gap: 4, marginBottom: 10,
+            background: 'var(--surface2)', borderRadius: 10,
+            border: '1px solid var(--border)', padding: 4,
+          }}>
             <button
-              onClick={execute}
-              disabled={running || selected.size === 0 || confirmDelete}
-              className={actionType === 'delete' ? '' : 'btn-green'}
-              style={actionType === 'delete' ? {
-                width: '100%', padding: '8px 16px', fontSize: 13, fontWeight: 600,
-                background: selected.size > 0 ? 'var(--danger)' : 'rgba(218,54,51,0.3)',
-                border: 'none', borderRadius: 6, color: '#fff', cursor: selected.size > 0 ? 'pointer' : 'not-allowed',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              } : { width: '100%', padding: '8px 16px', fontSize: 13 }}
+              onClick={() => setManageTab('bulk')}
+              style={{
+                flex: 1, padding: '7px 10px', borderRadius: 7,
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 12, fontWeight: manageTab === 'bulk' ? 600 : 400,
+                background: manageTab === 'bulk' ? 'var(--surface)' : 'transparent',
+                color: manageTab === 'bulk' ? 'var(--text)' : 'var(--text3)',
+                transition: 'all 0.15s',
+                boxShadow: manageTab === 'bulk' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+              }}
             >
-              {running
-                ? <><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Đang chạy...</>
-                : selected.size === 0
-                  ? 'Chọn repo để bắt đầu'
-                  : `${ACTION_LABELS[actionType].split(' ').slice(1).join(' ')} ${selected.size} repo`
-              }
+              ⚡ Hành động hàng loạt
+            </button>
+            <button
+              onClick={() => setManageTab('files')}
+              style={{
+                flex: 1, padding: '7px 10px', borderRadius: 7,
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 12, fontWeight: manageTab === 'files' ? 600 : 400,
+                background: manageTab === 'files' ? 'var(--surface)' : 'transparent',
+                color: manageTab === 'files' ? 'var(--accent)' : 'var(--text3)',
+                transition: 'all 0.15s',
+                boxShadow: manageTab === 'files' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              }}
+            >
+              <FilePlus size={12} /> Cập nhật file
             </button>
           </div>
 
-          {isRenameAction && selected.size > 0 && (
-            <div className="card" style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>👁 Preview đổi tên ({Math.min(selected.size, 5)} / {selected.size})</div>
-              {selectedList.slice(0, 5).map(r => {
-                const newN = previewNewName(r.name);
-                return (
-                  <div key={r.name} style={{ fontSize: 11, fontFamily: 'monospace', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ color: 'var(--muted)', textDecoration: 'line-through', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{r.name}</span>
-                    <ArrowRight size={10} style={{ color: 'var(--muted)', flexShrink: 0 }} />
-                    <span style={{ color: newN !== r.name ? '#2ea043' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{newN}</span>
+          {/* ── Bulk actions tab ── */}
+          {manageTab === 'bulk' && (
+            <>
+              <div className="card" style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>⚡ Hành động hàng loạt</div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label>Loại hành động</label>
+                  <select
+                    value={actionType}
+                    onChange={e => {
+                      const t = e.target.value as BulkAction;
+                      setActionType(t);
+                      setActionCfg({ type: t });
+                      setConfirmDelete(false);
+                    }}
+                  >
+                    {(Object.keys(ACTION_LABELS) as BulkAction[]).map(k => (
+                      <option key={k} value={k}>{ACTION_LABELS[k]}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {actionType === 'rename_prefix' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Tiền tố thêm vào đầu</label>
+                    <input type="text" placeholder="vd: 2024_" value={actionCfg.prefix ?? ''} onChange={e => setActionCfg(c => ({ ...c, prefix: e.target.value }))} />
+                    <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      vd: <code>2024_</code> + <code>my-repo</code> = <code style={{ color: '#2ea043' }}>2024_my-repo</code>
+                    </p>
                   </div>
-                );
-              })}
-              {selected.size > 5 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>... và {selected.size - 5} repo nữa</span>}
-            </div>
+                )}
+
+                {actionType === 'rename_suffix' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Hậu tố thêm vào cuối</label>
+                    <input type="text" placeholder="vd: _archive" value={actionCfg.suffix ?? ''} onChange={e => setActionCfg(c => ({ ...c, suffix: e.target.value }))} />
+                  </div>
+                )}
+
+                {actionType === 'rename_replace' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <label>Tìm chuỗi</label>
+                      <input type="text" placeholder="vd: ss3_" value={actionCfg.findStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, findStr: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label>Thay bằng</label>
+                      <input type="text" placeholder="vd: lab_ (để trống = xoá)" value={actionCfg.replaceStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, replaceStr: e.target.value }))} />
+                    </div>
+                  </div>
+                )}
+
+                {actionType === 'transfer' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Owner mới (username hoặc org)</label>
+                    <input type="text" placeholder="vd: my-organization" value={actionCfg.newOwner ?? ''} onChange={e => setActionCfg(c => ({ ...c, newOwner: e.target.value }))} />
+                    <p style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>⚠ Owner mới phải có quyền nhận repo</p>
+                  </div>
+                )}
+
+                {actionType === 'visibility' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Đổi thành</label>
+                    <select value={actionCfg.makePrivate ? 'private' : 'public'} onChange={e => setActionCfg(c => ({ ...c, makePrivate: e.target.value === 'private' }))}>
+                      <option value="public">Public</option>
+                      <option value="private">Private</option>
+                    </select>
+                  </div>
+                )}
+
+                {actionType === 'description' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Mô tả mới</label>
+                    <input type="text" placeholder="Mô tả repo..." value={actionCfg.description ?? ''} onChange={e => setActionCfg(c => ({ ...c, description: e.target.value }))} />
+                    <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Áp dụng cho tất cả repo đã chọn</p>
+                  </div>
+                )}
+
+                {actionType === 'delete' && (
+                  <div style={{ padding: '8px 10px', background: 'rgba(218,54,51,0.1)', border: '1px solid var(--danger)', borderRadius: 5, marginBottom: 12, fontSize: 12 }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--danger)', fontWeight: 600 }}>
+                      <AlertTriangle size={13} /> Không thể hoàn tác!
+                    </div>
+                    <div style={{ color: 'var(--muted)', marginTop: 4 }}>Repo bị xoá sẽ mất vĩnh viễn cùng toàn bộ code và issues.</div>
+                  </div>
+                )}
+
+                {confirmDelete && (
+                  <div style={{ padding: '10px', background: 'rgba(218,54,51,0.15)', border: '1px solid var(--danger)', borderRadius: 5, marginBottom: 12, fontSize: 12 }}>
+                    <p style={{ color: 'var(--danger)', fontWeight: 600, marginBottom: 8 }}>
+                      Xác nhận {actionType === 'delete' ? 'xoá' : 'chuyển'} {selected.size} repo?
+                    </p>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={execute} style={{ background: 'var(--danger)', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
+                        Xác nhận
+                      </button>
+                      <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setConfirmDelete(false)}>Huỷ</button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={execute}
+                  disabled={running || selected.size === 0 || confirmDelete}
+                  className={actionType === 'delete' ? '' : 'btn-green'}
+                  style={actionType === 'delete' ? {
+                    width: '100%', padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                    background: selected.size > 0 ? 'var(--danger)' : 'rgba(218,54,51,0.3)',
+                    border: 'none', borderRadius: 6, color: '#fff', cursor: selected.size > 0 ? 'pointer' : 'not-allowed',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  } : { width: '100%', padding: '8px 16px', fontSize: 13 }}
+                >
+                  {running
+                    ? <><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Đang chạy...</>
+                    : selected.size === 0
+                      ? 'Chọn repo để bắt đầu'
+                      : `${ACTION_LABELS[actionType].split(' ').slice(1).join(' ')} ${selected.size} repo`
+                  }
+                </button>
+              </div>
+
+              {isRenameAction && selected.size > 0 && (
+                <div className="card" style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>👁 Preview đổi tên ({Math.min(selected.size, 5)} / {selected.size})</div>
+                  {selectedList.slice(0, 5).map(r => {
+                    const newN = previewNewName(r.name);
+                    return (
+                      <div key={r.name} style={{ fontSize: 11, fontFamily: 'monospace', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ color: 'var(--muted)', textDecoration: 'line-through', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{r.name}</span>
+                        <ArrowRight size={10} style={{ color: 'var(--muted)', flexShrink: 0 }} />
+                        <span style={{ color: newN !== r.name ? '#2ea043' : 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>{newN}</span>
+                      </div>
+                    );
+                  })}
+                  {selected.size > 5 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>... và {selected.size - 5} repo nữa</span>}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── File update tab ── */}
+          {manageTab === 'files' && (
+            <RepoFileUpdater
+              token={token}
+              owner={effectiveOwner}
+              selectedRepos={selectedRepoNames}
+            />
           )}
         </div>
       </div>
 
-      {/* Logs */}
-      {logs.length > 0 && (
+      {/* Bulk action Logs */}
+      {manageTab === 'bulk' && logs.length > 0 && (
         <div className="card" style={{ marginTop: 12 }}>
           <div
             style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', marginBottom: showLogs ? 10 : 0 }}
