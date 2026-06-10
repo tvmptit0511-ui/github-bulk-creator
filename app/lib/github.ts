@@ -7,9 +7,11 @@ export async function createRepo(
   name: string,
   description: string,
   isPrivate: boolean,
-  autoInit: boolean
+  autoInit: boolean,
+  org?: string
 ) {
-  const res = await fetch(`${BASE}/user/repos`, {
+  const url = org ? `${BASE}/orgs/${org}/repos` : `${BASE}/user/repos`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `token ${token}`,
@@ -63,10 +65,6 @@ export async function getUser(token: string) {
   return await res.json();
 }
 
-/**
- * Lấy danh sách OAuth scopes từ header X-OAuth-Scopes
- * Trả về mảng scope, vd: ['repo', 'read:org', 'user']
- */
 export async function getTokenScopes(token: string): Promise<string[]> {
   const res = await fetch(`${BASE}/user`, {
     headers: {
@@ -82,16 +80,32 @@ export async function getTokenScopes(token: string): Promise<string[]> {
     .filter(Boolean);
 }
 
-/**
- * Kiểm tra token có quyền đọc org hay không
- */
 export function hasOrgScope(scopes: string[]): boolean {
   return scopes.some(s =>
     s === 'read:org' || s === 'write:org' || s === 'admin:org'
   );
 }
 
-// ─── Repo Management ───────────────────────────────────────────────────────────
+// ─── Org ──────────────────────────────────────────────────────────────────────
+
+export interface OrgInfo {
+  login: string;
+  avatar_url: string;
+  description: string | null;
+}
+
+export async function listUserOrgs(token: string): Promise<OrgInfo[]> {
+  const res = await fetch(`${BASE}/user/orgs?per_page=100`, {
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
+  });
+  if (!res.ok) throw new Error('Không thể tải danh sách tổ chức');
+  return await res.json();
+}
+
+// ─── Repo Management ──────────────────────────────────────────────────────────
 
 export interface RepoInfo {
   id: number;
@@ -119,6 +133,25 @@ export async function listUserRepos(
     }
   );
   if (!res.ok) throw new Error('Không thể tải danh sách repo');
+  return await res.json();
+}
+
+export async function listOrgRepos(
+  token: string,
+  org: string,
+  page = 1,
+  perPage = 100
+): Promise<RepoInfo[]> {
+  const res = await fetch(
+    `${BASE}/orgs/${org}/repos?per_page=${perPage}&page=${page}&sort=updated&type=all`,
+    {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+      },
+    }
+  );
+  if (!res.ok) throw new Error(`Không thể tải repo của tổ chức ${org}`);
   return await res.json();
 }
 
@@ -167,7 +200,7 @@ export async function deleteRepo(
       Accept: 'application/vnd.github.v3+json',
     },
   });
-  if (res.status === 204) return; // success
+  if (res.status === 204) return;
   const data = await res.json().catch(() => ({}));
   throw new Error(data.message || 'Không thể xoá repo');
 }

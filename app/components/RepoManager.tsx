@@ -4,8 +4,9 @@ import {
   Search, RefreshCw, Trash2, Edit3, ArrowRight, Lock, Unlock,
   CheckSquare, Square, Loader, CheckCircle, XCircle, Clock,
   AlertTriangle, GitBranch, ChevronDown, ChevronUp, Filter,
+  Building2, User, ChevronRight,
 } from 'lucide-react';
-import { listUserRepos, updateRepo, deleteRepo, transferRepo, RepoInfo } from '@/app/lib/github';
+import { listUserRepos, listOrgRepos, listUserOrgs, updateRepo, deleteRepo, transferRepo, RepoInfo, OrgInfo } from '@/app/lib/github';
 import { LogItem } from '@/app/types';
 
 interface Props {
@@ -17,16 +18,12 @@ type BulkAction = 'rename_prefix' | 'rename_suffix' | 'rename_replace' | 'delete
 
 interface ActionConfig {
   type: BulkAction;
-  // rename
   prefix?: string;
   suffix?: string;
   findStr?: string;
   replaceStr?: string;
-  // transfer
   newOwner?: string;
-  // visibility
   makePrivate?: boolean;
-  // description
   description?: string;
 }
 
@@ -40,10 +37,20 @@ const ACTION_LABELS: Record<BulkAction, string> = {
   description: '📝 Cập nhật mô tả',
 };
 
+// Owner = personal username hoặc org login
+type OwnerMode = 'personal' | string; // string = org login
+
 export default function RepoManager({ token, username }: Props) {
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+
+  // Org selector
+  const [orgs, setOrgs] = useState<OrgInfo[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [ownerMode, setOwnerMode] = useState<OwnerMode>('personal');
+  const [orgSelectorOpen, setOrgSelectorOpen] = useState(false);
+
   const [filter, setFilter] = useState('');
   const [filterPrivate, setFilterPrivate] = useState<'all' | 'public' | 'private'>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -58,13 +65,31 @@ export default function RepoManager({ token, username }: Props) {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
 
+  // Effective owner for API calls
+  const effectiveOwner = ownerMode === 'personal' ? username : ownerMode;
+
+  // Load orgs on mount / token change
+  useEffect(() => {
+    if (!token) return;
+    setOrgsLoading(true);
+    listUserOrgs(token)
+      .then(data => setOrgs(data))
+      .catch(() => setOrgs([]))
+      .finally(() => setOrgsLoading(false));
+  }, [token]);
+
   const loadRepos = useCallback(async (reset = true) => {
     if (!token) return;
     setLoading(true);
     setLoadError('');
     const p = reset ? 1 : page;
     try {
-      const data = await listUserRepos(token, p, 100);
+      let data: RepoInfo[];
+      if (ownerMode === 'personal') {
+        data = await listUserRepos(token, p, 100);
+      } else {
+        data = await listOrgRepos(token, ownerMode, p, 100);
+      }
       if (reset) {
         setRepos(data);
         setPage(1);
@@ -81,11 +106,16 @@ export default function RepoManager({ token, username }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token, page]);
+  }, [token, page, ownerMode]);
 
+  // Reload when owner switches
   useEffect(() => {
-    if (token) loadRepos();
-  }, [token]);
+    if (token) {
+      setSelected(new Set());
+      setLogs([]);
+      loadRepos(true);
+    }
+  }, [token, ownerMode]);
 
   const filtered = repos.filter(r => {
     const matchName = r.name.toLowerCase().includes(filter.toLowerCase());
@@ -114,16 +144,13 @@ export default function RepoManager({ token, username }: Props) {
 
   function previewNewName(oldName: string): string {
     switch (actionType) {
-      case 'rename_prefix':
-        return (actionCfg.prefix || '') + oldName;
-      case 'rename_suffix':
-        return oldName + (actionCfg.suffix || '');
+      case 'rename_prefix': return (actionCfg.prefix || '') + oldName;
+      case 'rename_suffix': return oldName + (actionCfg.suffix || '');
       case 'rename_replace':
         return actionCfg.findStr
           ? oldName.replaceAll(actionCfg.findStr, actionCfg.replaceStr || '')
           : oldName;
-      default:
-        return oldName;
+      default: return oldName;
     }
   }
 
@@ -133,12 +160,8 @@ export default function RepoManager({ token, username }: Props) {
 
   async function execute() {
     if (selected.size === 0) return;
-
     const isDestructive = actionType === 'delete' || actionType === 'transfer';
-    if (isDestructive && !confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
+    if (isDestructive && !confirmDelete) { setConfirmDelete(true); return; }
 
     setRunning(true);
     setConfirmDelete(false);
@@ -148,7 +171,6 @@ export default function RepoManager({ token, username }: Props) {
 
     const names = [...selected];
     setLogs(names.map(n => ({ name: n, status: 'pending', message: 'Chờ...' })));
-
     let ok = 0, err = 0;
 
     for (const name of names) {
@@ -161,47 +183,37 @@ export default function RepoManager({ token, username }: Props) {
             const newName = previewNewName(name);
             if (newName === name) {
               updateLog(name, { status: 'skip', message: 'Tên không thay đổi, bỏ qua' });
-              ok++; setOkCount(ok);
-              break;
+              ok++; setOkCount(ok); break;
             }
-            await updateRepo(token, username, name, { name: newName });
-            // Update local list
+            await updateRepo(token, effectiveOwner, name, { name: newName });
             setRepos(prev => prev.map(r => r.name === name ? { ...r, name: newName } : r));
             updateLog(name, { status: 'ok', message: `✓ Đổi thành "${newName}"` });
-            ok++; setOkCount(ok);
-            break;
+            ok++; setOkCount(ok); break;
           }
           case 'delete': {
-            await deleteRepo(token, username, name);
+            await deleteRepo(token, effectiveOwner, name);
             setRepos(prev => prev.filter(r => r.name !== name));
             updateLog(name, { status: 'ok', message: '✓ Đã xoá' });
-            ok++; setOkCount(ok);
-            break;
+            ok++; setOkCount(ok); break;
           }
           case 'transfer': {
             if (!actionCfg.newOwner) throw new Error('Chưa nhập owner mới');
-            await transferRepo(token, username, name, actionCfg.newOwner);
+            await transferRepo(token, effectiveOwner, name, actionCfg.newOwner);
             setRepos(prev => prev.filter(r => r.name !== name));
             updateLog(name, { status: 'ok', message: `✓ Chuyển cho @${actionCfg.newOwner}` });
-            ok++; setOkCount(ok);
-            break;
+            ok++; setOkCount(ok); break;
           }
           case 'visibility': {
-            await updateRepo(token, username, name, { private: actionCfg.makePrivate });
+            await updateRepo(token, effectiveOwner, name, { private: actionCfg.makePrivate });
             setRepos(prev => prev.map(r => r.name === name ? { ...r, private: !!actionCfg.makePrivate } : r));
-            updateLog(name, {
-              status: 'ok',
-              message: `✓ Đổi thành ${actionCfg.makePrivate ? 'Private' : 'Public'}`,
-            });
-            ok++; setOkCount(ok);
-            break;
+            updateLog(name, { status: 'ok', message: `✓ Đổi thành ${actionCfg.makePrivate ? 'Private' : 'Public'}` });
+            ok++; setOkCount(ok); break;
           }
           case 'description': {
-            await updateRepo(token, username, name, { description: actionCfg.description ?? '' });
+            await updateRepo(token, effectiveOwner, name, { description: actionCfg.description ?? '' });
             setRepos(prev => prev.map(r => r.name === name ? { ...r, description: actionCfg.description ?? null } : r));
             updateLog(name, { status: 'ok', message: '✓ Cập nhật mô tả' });
-            ok++; setOkCount(ok);
-            break;
+            ok++; setOkCount(ok); break;
           }
         }
       } catch (e) {
@@ -219,6 +231,8 @@ export default function RepoManager({ token, username }: Props) {
   const isRenameAction = ['rename_prefix', 'rename_suffix', 'rename_replace'].includes(actionType);
   const selectedList = filtered.filter(r => selected.has(r.name));
 
+  const currentOrgInfo = ownerMode !== 'personal' ? orgs.find(o => o.login === ownerMode) : null;
+
   if (!token) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
@@ -230,6 +244,96 @@ export default function RepoManager({ token, username }: Props) {
 
   return (
     <div>
+      {/* Owner Selector */}
+      <div className="card" style={{ marginBottom: 12, padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text3)', flexShrink: 0 }}>
+            Xem repo của
+          </span>
+
+          {/* Personal button */}
+          <button
+            onClick={() => { setOwnerMode('personal'); setOrgSelectorOpen(false); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: `1px solid ${ownerMode === 'personal' ? 'var(--accent)' : 'var(--border)'}`,
+              background: ownerMode === 'personal' ? 'var(--accent-dim)' : 'var(--surface2)',
+              color: ownerMode === 'personal' ? 'var(--accent)' : 'var(--text2)',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: ownerMode === 'personal' ? 600 : 400,
+              transition: 'all 0.15s',
+              fontFamily: 'inherit',
+            }}
+          >
+            <User size={13} />
+            <span>@{username || 'cá nhân'}</span>
+          </button>
+
+          {/* Org buttons / loading */}
+          {orgsLoading ? (
+            <span style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> Đang tải tổ chức...
+            </span>
+          ) : orgs.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>
+              Không có tổ chức nào (cần scope <code style={{ fontSize: 11 }}>read:org</code>)
+            </span>
+          ) : (
+            orgs.map(org => (
+              <button
+                key={org.login}
+                onClick={() => { setOwnerMode(org.login); setOrgSelectorOpen(false); }}
+                title={org.description || org.login}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: `1px solid ${ownerMode === org.login ? 'var(--accent)' : 'var(--border)'}`,
+                  background: ownerMode === org.login ? 'var(--accent-dim)' : 'var(--surface2)',
+                  color: ownerMode === org.login ? 'var(--accent)' : 'var(--text2)',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: ownerMode === org.login ? 600 : 400,
+                  transition: 'all 0.15s',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {org.avatar_url ? (
+                  <img src={org.avatar_url} alt={org.login} style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0 }} />
+                ) : (
+                  <Building2 size={13} />
+                )}
+                <span>{org.login}</span>
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* Current context badge */}
+        {ownerMode !== 'personal' && (
+          <div style={{
+            marginTop: 10, padding: '7px 12px',
+            background: 'rgba(61,126,255,0.07)',
+            border: '1px solid rgba(61,126,255,0.18)',
+            borderRadius: 7,
+            fontSize: 12,
+            color: 'var(--text2)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <Building2 size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            <span>
+              Đang xem repo của tổ chức <strong style={{ color: 'var(--accent)' }}>{ownerMode}</strong>
+              {currentOrgInfo?.description && (
+                <span style={{ color: 'var(--text3)', marginLeft: 6 }}>— {currentOrgInfo.description}</span>
+              )}
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* Toolbar */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -284,7 +388,6 @@ export default function RepoManager({ token, username }: Props) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 12, alignItems: 'start' }}>
         {/* Repo list */}
         <div>
-          {/* Select all bar */}
           {filtered.length > 0 && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
@@ -309,7 +412,6 @@ export default function RepoManager({ token, username }: Props) {
             </div>
           )}
 
-          {/* List */}
           <div style={{
             border: '1px solid var(--border)',
             borderRadius: filtered.length > 0 ? '0 0 6px 6px' : 6,
@@ -398,18 +500,12 @@ export default function RepoManager({ token, username }: Props) {
               </select>
             </div>
 
-            {/* Dynamic fields */}
             {actionType === 'rename_prefix' && (
               <div style={{ marginBottom: 12 }}>
                 <label>Tiền tố thêm vào đầu</label>
-                <input
-                  type="text"
-                  placeholder="vd: 2024_"
-                  value={actionCfg.prefix ?? ''}
-                  onChange={e => setActionCfg(c => ({ ...c, prefix: e.target.value }))}
-                />
+                <input type="text" placeholder="vd: 2024_" value={actionCfg.prefix ?? ''} onChange={e => setActionCfg(c => ({ ...c, prefix: e.target.value }))} />
                 <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  vd: <code style={{ background: 'var(--surface2)', padding: '0 3px', borderRadius: 3 }}>2024_</code> + <code style={{ background: 'var(--surface2)', padding: '0 3px', borderRadius: 3 }}>my-repo</code> = <code style={{ color: '#2ea043' }}>2024_my-repo</code>
+                  vd: <code>2024_</code> + <code>my-repo</code> = <code style={{ color: '#2ea043' }}>2024_my-repo</code>
                 </p>
               </div>
             )}
@@ -417,12 +513,7 @@ export default function RepoManager({ token, username }: Props) {
             {actionType === 'rename_suffix' && (
               <div style={{ marginBottom: 12 }}>
                 <label>Hậu tố thêm vào cuối</label>
-                <input
-                  type="text"
-                  placeholder="vd: _archive"
-                  value={actionCfg.suffix ?? ''}
-                  onChange={e => setActionCfg(c => ({ ...c, suffix: e.target.value }))}
-                />
+                <input type="text" placeholder="vd: _archive" value={actionCfg.suffix ?? ''} onChange={e => setActionCfg(c => ({ ...c, suffix: e.target.value }))} />
               </div>
             )}
 
@@ -430,21 +521,11 @@ export default function RepoManager({ token, username }: Props) {
               <div style={{ marginBottom: 12 }}>
                 <div style={{ marginBottom: 8 }}>
                   <label>Tìm chuỗi</label>
-                  <input
-                    type="text"
-                    placeholder="vd: ss3_"
-                    value={actionCfg.findStr ?? ''}
-                    onChange={e => setActionCfg(c => ({ ...c, findStr: e.target.value }))}
-                  />
+                  <input type="text" placeholder="vd: ss3_" value={actionCfg.findStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, findStr: e.target.value }))} />
                 </div>
                 <div>
                   <label>Thay bằng</label>
-                  <input
-                    type="text"
-                    placeholder="vd: lab_ (để trống = xoá)"
-                    value={actionCfg.replaceStr ?? ''}
-                    onChange={e => setActionCfg(c => ({ ...c, replaceStr: e.target.value }))}
-                  />
+                  <input type="text" placeholder="vd: lab_ (để trống = xoá)" value={actionCfg.replaceStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, replaceStr: e.target.value }))} />
                 </div>
               </div>
             )}
@@ -452,25 +533,15 @@ export default function RepoManager({ token, username }: Props) {
             {actionType === 'transfer' && (
               <div style={{ marginBottom: 12 }}>
                 <label>Owner mới (username hoặc org)</label>
-                <input
-                  type="text"
-                  placeholder="vd: my-organization"
-                  value={actionCfg.newOwner ?? ''}
-                  onChange={e => setActionCfg(c => ({ ...c, newOwner: e.target.value }))}
-                />
-                <p style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>
-                  ⚠ Owner mới phải có quyền nhận repo
-                </p>
+                <input type="text" placeholder="vd: my-organization" value={actionCfg.newOwner ?? ''} onChange={e => setActionCfg(c => ({ ...c, newOwner: e.target.value }))} />
+                <p style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>⚠ Owner mới phải có quyền nhận repo</p>
               </div>
             )}
 
             {actionType === 'visibility' && (
               <div style={{ marginBottom: 12 }}>
                 <label>Đổi thành</label>
-                <select
-                  value={actionCfg.makePrivate ? 'private' : 'public'}
-                  onChange={e => setActionCfg(c => ({ ...c, makePrivate: e.target.value === 'private' }))}
-                >
+                <select value={actionCfg.makePrivate ? 'private' : 'public'} onChange={e => setActionCfg(c => ({ ...c, makePrivate: e.target.value === 'private' }))}>
                   <option value="public">Public</option>
                   <option value="private">Private</option>
                 </select>
@@ -480,17 +551,11 @@ export default function RepoManager({ token, username }: Props) {
             {actionType === 'description' && (
               <div style={{ marginBottom: 12 }}>
                 <label>Mô tả mới</label>
-                <input
-                  type="text"
-                  placeholder="Mô tả repo..."
-                  value={actionCfg.description ?? ''}
-                  onChange={e => setActionCfg(c => ({ ...c, description: e.target.value }))}
-                />
+                <input type="text" placeholder="Mô tả repo..." value={actionCfg.description ?? ''} onChange={e => setActionCfg(c => ({ ...c, description: e.target.value }))} />
                 <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Áp dụng cho tất cả repo đã chọn</p>
               </div>
             )}
 
-            {/* Delete warning */}
             {actionType === 'delete' && (
               <div style={{ padding: '8px 10px', background: 'rgba(218,54,51,0.1)', border: '1px solid var(--danger)', borderRadius: 5, marginBottom: 12, fontSize: 12 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--danger)', fontWeight: 600 }}>
@@ -500,22 +565,16 @@ export default function RepoManager({ token, username }: Props) {
               </div>
             )}
 
-            {/* Confirm step for destructive actions */}
             {confirmDelete && (
               <div style={{ padding: '10px', background: 'rgba(218,54,51,0.15)', border: '1px solid var(--danger)', borderRadius: 5, marginBottom: 12, fontSize: 12 }}>
                 <p style={{ color: 'var(--danger)', fontWeight: 600, marginBottom: 8 }}>
                   Xác nhận {actionType === 'delete' ? 'xoá' : 'chuyển'} {selected.size} repo?
                 </p>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    onClick={execute}
-                    style={{ background: 'var(--danger)', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', padding: '4px 12px', fontSize: 12, fontWeight: 600 }}
-                  >
+                  <button onClick={execute} style={{ background: 'var(--danger)', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
                     Xác nhận
                   </button>
-                  <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setConfirmDelete(false)}>
-                    Huỷ
-                  </button>
+                  <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setConfirmDelete(false)}>Huỷ</button>
                 </div>
               </div>
             )}
@@ -529,9 +588,7 @@ export default function RepoManager({ token, username }: Props) {
                 background: selected.size > 0 ? 'var(--danger)' : 'rgba(218,54,51,0.3)',
                 border: 'none', borderRadius: 6, color: '#fff', cursor: selected.size > 0 ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              } : {
-                width: '100%', padding: '8px 16px', fontSize: 13,
-              }}
+              } : { width: '100%', padding: '8px 16px', fontSize: 13 }}
             >
               {running
                 ? <><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Đang chạy...</>
@@ -542,7 +599,6 @@ export default function RepoManager({ token, username }: Props) {
             </button>
           </div>
 
-          {/* Preview for rename */}
           {isRenameAction && selected.size > 0 && (
             <div className="card" style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--muted)' }}>👁 Preview đổi tên ({Math.min(selected.size, 5)} / {selected.size})</div>
@@ -580,7 +636,6 @@ export default function RepoManager({ token, username }: Props) {
             </span>
           </div>
 
-          {/* Progress bar */}
           <div style={{ height: 4, background: 'var(--surface2)', borderRadius: 2, marginBottom: showLogs ? 10 : 0, overflow: 'hidden' }}>
             <div style={{
               height: '100%',
