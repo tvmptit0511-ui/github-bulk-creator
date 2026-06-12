@@ -1,13 +1,13 @@
 'use client';
-import { useState, useCallback, useMemo } from 'react';
-import { Rocket, History, Settings, Wrench } from 'lucide-react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { Rocket, History, Settings, Wrench, User, Building2, Loader } from 'lucide-react';
 import AuthCard from './components/AuthCard';
 import RepoNameBuilder from './components/RepoNameBuilder';
 import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
 import LogPanel from './components/LogPanel';
 import HistoryPanel from './components/HistoryPanel';
 import RepoManager from './components/RepoManager';
-import { createRepo, uploadFile } from './lib/github';
+import { createRepo, uploadFile, listUserOrgs, OrgInfo } from './lib/github';
 import { saveHistory } from './lib/storage';
 import { CreationMode, LogItem, RepoFile } from './types';
 
@@ -19,6 +19,11 @@ export default function Home() {
   // Auth
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
+
+  // Org selection for create tab
+  const [orgs, setOrgs] = useState<OrgInfo[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<string>('personal'); // 'personal' or org login
 
   // Repo naming
   const [mode, setMode] = useState<CreationMode>('range');
@@ -43,6 +48,20 @@ export default function Home() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [okCount, setOkCount] = useState(0);
   const [errCount, setErrCount] = useState(0);
+
+  // Load orgs when token is available
+  useEffect(() => {
+    if (!token) {
+      setOrgs([]);
+      setSelectedOrg('personal');
+      return;
+    }
+    setOrgsLoading(true);
+    listUserOrgs(token)
+      .then(data => setOrgs(data))
+      .catch(() => setOrgs([]))
+      .finally(() => setOrgsLoading(false));
+  }, [token]);
 
   function getNames(): string[] {
     if (mode === 'range') {
@@ -74,6 +93,8 @@ export default function Home() {
     if (names.length === 0) { alert('Chưa có tên repo nào!'); return; }
     if (names.length > 100 && !confirm(`Bạn sắp tạo ${names.length} repos. Tiếp tục?`)) return;
 
+    const orgTarget = selectedOrg === 'personal' ? undefined : selectedOrg;
+
     setRunning(true);
     setOkCount(0);
     setErrCount(0);
@@ -96,11 +117,12 @@ export default function Home() {
       }
 
       try {
-        const repo = await createRepo(token, name, description, isPrivate, autoInit);
+        const repo = await createRepo(token, name, description, isPrivate, autoInit, orgTarget);
+        const repoOwner = orgTarget ?? username;
         if (mergedFiles.length > 0) {
           updateLog(name, { message: `Upload ${mergedFiles.length} file...` });
           for (const f of mergedFiles) {
-            await uploadFile(token, username, name, f);
+            await uploadFile(token, repoOwner, name, f);
           }
         }
         updateLog(name, { status: 'ok', message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`, url: repo.html_url });
@@ -122,6 +144,8 @@ export default function Home() {
   const handleAuth = useCallback((t: string, u: string) => {
     setToken(t); setUsername(u);
   }, []);
+
+  const currentOrgInfo = selectedOrg !== 'personal' ? orgs.find(o => o.login === selectedOrg) : null;
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
@@ -158,6 +182,106 @@ export default function Home() {
           <>
             <AuthCard onAuth={handleAuth} />
 
+            {/* Org selector */}
+            {token && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text3)' }}>
+                    Tạo repo trong
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {/* Personal */}
+                  <button
+                    onClick={() => setSelectedOrg('personal')}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      padding: '7px 14px', borderRadius: 8,
+                      border: `1.5px solid ${selectedOrg === 'personal' ? 'var(--accent)' : 'var(--border)'}`,
+                      background: selectedOrg === 'personal' ? 'var(--accent-dim)' : 'var(--surface2)',
+                      color: selectedOrg === 'personal' ? 'var(--accent)' : 'var(--text2)',
+                      cursor: 'pointer', fontSize: 13,
+                      fontWeight: selectedOrg === 'personal' ? 600 : 400,
+                      transition: 'all 0.15s', fontFamily: 'inherit',
+                      boxShadow: selectedOrg === 'personal' ? '0 0 0 1px rgba(61,126,255,0.15)' : 'none',
+                    }}
+                  >
+                    <User size={13} />
+                    <span>@{username || 'cá nhân'}</span>
+                    {selectedOrg === 'personal' && (
+                      <span style={{ fontSize: 10, background: 'var(--accent)', color: '#fff', borderRadius: 4, padding: '1px 5px', marginLeft: 2 }}>
+                        ✓
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Orgs */}
+                  {orgsLoading ? (
+                    <span style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                      Đang tải tổ chức...
+                    </span>
+                  ) : orgs.length === 0 ? (
+                    <span style={{ fontSize: 12, color: 'var(--text3)', fontStyle: 'italic' }}>
+                      Không có tổ chức nào — cần scope <code style={{ fontSize: 11 }}>read:org</code>
+                    </span>
+                  ) : (
+                    orgs.map(org => (
+                      <button
+                        key={org.login}
+                        onClick={() => setSelectedOrg(org.login)}
+                        title={org.description || org.login}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 7,
+                          padding: '7px 14px', borderRadius: 8,
+                          border: `1.5px solid ${selectedOrg === org.login ? 'var(--accent)' : 'var(--border)'}`,
+                          background: selectedOrg === org.login ? 'var(--accent-dim)' : 'var(--surface2)',
+                          color: selectedOrg === org.login ? 'var(--accent)' : 'var(--text2)',
+                          cursor: 'pointer', fontSize: 13,
+                          fontWeight: selectedOrg === org.login ? 600 : 400,
+                          transition: 'all 0.15s', fontFamily: 'inherit',
+                          boxShadow: selectedOrg === org.login ? '0 0 0 1px rgba(61,126,255,0.15)' : 'none',
+                        }}
+                      >
+                        {org.avatar_url ? (
+                          <img src={org.avatar_url} alt={org.login} style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0 }} />
+                        ) : (
+                          <Building2 size={13} />
+                        )}
+                        <span>{org.login}</span>
+                        {selectedOrg === org.login && (
+                          <span style={{ fontSize: 10, background: 'var(--accent)', color: '#fff', borderRadius: 4, padding: '1px 5px', marginLeft: 2 }}>
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                {/* Active selection info banner */}
+                {selectedOrg !== 'personal' && currentOrgInfo && (
+                  <div style={{
+                    marginTop: 10, padding: '8px 12px',
+                    background: 'rgba(61,126,255,0.07)',
+                    border: '1px solid rgba(61,126,255,0.18)',
+                    borderRadius: 7, fontSize: 12, color: 'var(--text2)',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <Building2 size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                    <span>
+                      Repo sẽ được tạo trong tổ chức{' '}
+                      <strong style={{ color: 'var(--accent)' }}>{selectedOrg}</strong>
+                      {currentOrgInfo.description && (
+                        <span style={{ color: 'var(--text3)', marginLeft: 6 }}>— {currentOrgInfo.description}</span>
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <RepoNameBuilder
               mode={mode} onModeChange={setMode}
               baseName={baseName} onBaseNameChange={setBaseName}
@@ -165,7 +289,7 @@ export default function Home() {
               onRangeFromChange={setRangeFrom} onRangeToChange={setRangeTo}
               manualNames={manualNames} onManualNamesChange={setManualNames}
               freeText={freeText} onFreeTextChange={setFreeText}
-              username={username}
+              username={selectedOrg === 'personal' ? username : selectedOrg}
             />
 
             <div className="card" style={{ marginBottom: 16 }}>
@@ -214,7 +338,7 @@ export default function Home() {
               >
                 {running
                   ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Đang tạo...</>
-                  : <><Rocket size={16} /> Tạo {names.length > 0 ? `${names.length} ` : ''}Repo</>
+                  : <><Rocket size={16} /> Tạo {names.length > 0 ? `${names.length} ` : ''}Repo{selectedOrg !== 'personal' ? ` trong ${selectedOrg}` : ''}</>
                 }
               </button>
               {!token && <span style={{ color: 'var(--warning)', fontSize: 13 }}>⚠ Chưa xác thực</span>}
