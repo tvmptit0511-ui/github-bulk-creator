@@ -10,7 +10,7 @@ import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
 import LogPanel from './components/LogPanel';
 import HistoryPanel from './components/HistoryPanel';
 import RepoManager from './components/RepoManager';
-import { createRepo, uploadFile } from './lib/github';
+import { createRepo, uploadFile, listUserOrgs, OrgInfo } from './lib/github';
 import { saveHistory, getHistory } from './lib/storage';
 import { CreationMode, LogItem, RepoFile } from './types';
 
@@ -23,6 +23,11 @@ export default function Home() {
   const [token, setToken] = useState('');
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+
+  // Orgs
+  const [orgs, setOrgs] = useState<OrgInfo[]>([]);
+  const [selectedOrg, setSelectedOrg] = useState('');
+  const [orgsLoading, setOrgsLoading] = useState(false);
 
   // Repo naming
   const [mode, setMode] = useState<CreationMode>('range');
@@ -88,6 +93,9 @@ export default function Home() {
     let ok = 0, err = 0;
     const results: { name: string; status: 'ok' | 'err'; url?: string; error?: string }[] = [];
 
+    // owner dùng để upload file: nếu tạo trong org thì owner = org, ngược lại = username
+    const effectiveOwner = selectedOrg || username;
+
     for (const name of names) {
       updateLog(name, { status: 'running', message: 'Đang tạo repo...' });
 
@@ -102,11 +110,11 @@ export default function Home() {
       }
 
       try {
-        const repo = await createRepo(token, name, description, isPrivate, autoInit);
+        const repo = await createRepo(token, name, description, isPrivate, autoInit, selectedOrg || undefined);
         if (mergedFiles.length > 0) {
           updateLog(name, { message: `Upload ${mergedFiles.length} file...` });
           for (const f of mergedFiles) {
-            await uploadFile(token, username, name, f);
+            await uploadFile(token, effectiveOwner, name, f);
           }
         }
         updateLog(name, { status: 'ok', message: `✓ Xong${mergedFiles.length > 0 ? ` (${mergedFiles.length} file)` : ''}`, url: repo.html_url });
@@ -125,9 +133,28 @@ export default function Home() {
     setRunning(false);
   }
 
-  const handleAuth = useCallback((t: string, u: string, av: string) => {
-    setToken(t); setUsername(u); setAvatarUrl(av);
+  const handleAuth = useCallback(async (t: string, u: string, av: string) => {
+    setToken(t);
+    setUsername(u);
+    setAvatarUrl(av);
+    setSelectedOrg('');
+    setOrgs([]);
+
+    // Fetch danh sách tổ chức
+    setOrgsLoading(true);
+    try {
+      const data = await listUserOrgs(t);
+      setOrgs(data);
+    } catch {
+      setOrgs([]);
+    } finally {
+      setOrgsLoading(false);
+    }
   }, []);
+
+  const ownerLabel = selectedOrg
+    ? orgs.find(o => o.login === selectedOrg)?.login ?? selectedOrg
+    : username;
 
   return (
     <div className="app-shell">
@@ -174,6 +201,10 @@ export default function Home() {
                     manualNames={manualNames} onManualNamesChange={setManualNames}
                     freeText={freeText} onFreeTextChange={setFreeText}
                     username={username}
+                    orgs={orgs}
+                    orgsLoading={orgsLoading}
+                    selectedOrg={selectedOrg}
+                    onOrgChange={setSelectedOrg}
                   />
                   <PerRepoFileManager
                     repos={syncedEntries}
@@ -191,7 +222,6 @@ export default function Home() {
                       <Settings size={15} style={{ color: 'var(--text2)' }} />
                       <span className="card-title">Cài đặt Repo</span>
                     </div>
-
                     <div style={{ marginBottom: 12 }}>
                       <label>Visibility</label>
                       <div className="segment-group">
@@ -239,7 +269,7 @@ export default function Home() {
                     >
                       {running
                         ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Đang tạo...</>
-                        : <><Rocket size={16} /> Tạo {names.length > 0 ? `${names.length} ` : ''}Repo</>
+                        : <><Rocket size={16} /> Tạo {names.length > 0 ? `${names.length} ` : ''}Repo{selectedOrg ? ` trong ${selectedOrg}` : ''}</>
                       }
                     </button>
 
@@ -256,6 +286,7 @@ export default function Home() {
                     {token && names.length > 0 && (
                       <div style={{ fontSize: 12, color: 'var(--text2)' }}>
                         Sẵn sàng tạo <strong style={{ color: 'var(--green)' }}>{names.length}</strong> repo
+                        {' '}dưới <strong style={{ color: 'var(--accent)' }}>{ownerLabel}</strong>
                         {sharedFiles.length > 0 && ` · ${sharedFiles.length} file đính kèm`}
                       </div>
                     )}

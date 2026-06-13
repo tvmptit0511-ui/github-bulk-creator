@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
-import { Plus, X, Hash, List, AlignLeft } from 'lucide-react';
+import { Plus, X, Hash, List, AlignLeft, ChevronDown } from 'lucide-react';
 import { CreationMode } from '@/app/types';
+import { OrgInfo } from '@/app/lib/github';
 
 interface Props {
   mode: CreationMode;
@@ -17,6 +18,11 @@ interface Props {
   freeText: string;
   onFreeTextChange: (v: string) => void;
   username: string;
+  // Owner / Org
+  orgs: OrgInfo[];
+  orgsLoading: boolean;
+  selectedOrg: string;
+  onOrgChange: (org: string) => void;
 }
 
 const MODES: { id: CreationMode; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -25,7 +31,16 @@ const MODES: { id: CreationMode; label: string; icon: React.ReactNode; desc: str
   { id: 'free', label: 'Tự do', icon: <AlignLeft size={13} />, desc: 'Dán danh sách' },
 ];
 
-export default function RepoNameBuilder({ mode, onModeChange, baseName, onBaseNameChange, rangeFrom, rangeTo, onRangeFromChange, onRangeToChange, manualNames, onManualNamesChange, freeText, onFreeTextChange, username }: Props) {
+export default function RepoNameBuilder({
+  mode, onModeChange,
+  baseName, onBaseNameChange,
+  rangeFrom, rangeTo,
+  onRangeFromChange, onRangeToChange,
+  manualNames, onManualNamesChange,
+  freeText, onFreeTextChange,
+  username,
+  orgs, orgsLoading, selectedOrg, onOrgChange,
+}: Props) {
   function getPreviewNames(): string[] {
     if (mode === 'range') {
       const from = Math.min(rangeFrom, rangeTo);
@@ -43,6 +58,12 @@ export default function RepoNameBuilder({ mode, onModeChange, baseName, onBaseNa
   const preview = names.slice(0, 5);
   const rest = count - 5;
 
+  // Owner hiển thị trong preview
+  const ownerDisplay = selectedOrg || username || 'username';
+
+  // Avatar của owner đang chọn
+  const selectedOrgInfo = orgs.find(o => o.login === selectedOrg);
+
   function updateManual(idx: number, val: string) {
     const copy = [...manualNames];
     copy[idx] = val;
@@ -57,6 +78,61 @@ export default function RepoNameBuilder({ mode, onModeChange, baseName, onBaseNa
           <span className="badge badge-blue">{count} repo</span>
         )}
       </div>
+
+      {/* ── Owner dropdown ── */}
+      {username && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ marginBottom: 6, display: 'block', fontSize: 12, color: 'var(--text2)', fontWeight: 500 }}>
+            Owner
+          </label>
+          {orgsLoading ? (
+            <div style={{ fontSize: 12, color: 'var(--text2)', padding: '8px 0' }}>
+              Đang tải tổ chức...
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              {/* Avatar hiển thị bên trái select */}
+              <div style={{
+                position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+                display: 'flex', alignItems: 'center', pointerEvents: 'none', zIndex: 1,
+              }}>
+                {selectedOrgInfo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={selectedOrgInfo.avatar_url} alt={selectedOrgInfo.login} width={18} height={18} style={{ borderRadius: '50%' }} />
+                ) : (
+                  <div style={{
+                    width: 18, height: 18, borderRadius: '50%',
+                    background: 'linear-gradient(135deg, var(--accent), var(--green))',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 9, fontWeight: 700, color: '#fff',
+                  }}>
+                    {(username[0] ?? '?').toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <select
+                value={selectedOrg}
+                onChange={e => onOrgChange(e.target.value)}
+                style={{
+                  width: '100%',
+                  paddingLeft: 36,
+                  paddingRight: 32,
+                  appearance: 'none',
+                }}
+              >
+                <option value="">{username} (cá nhân)</option>
+                {orgs.map(o => (
+                  <option key={o.login} value={o.login}>{o.login} (org)</option>
+                ))}
+              </select>
+              <ChevronDown size={13} style={{
+                position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                pointerEvents: 'none', color: 'var(--text2)',
+              }} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Mode selector */}
       <div className="mode-tabs">
@@ -118,7 +194,7 @@ export default function RepoNameBuilder({ mode, onModeChange, baseName, onBaseNa
         </div>
       )}
 
-      {/* Preview */}
+      {/* Preview — URL đổi theo owner */}
       {count > 0 && (
         <div style={{ marginTop: 14, background: 'var(--bg2)', borderRadius: 8, padding: '12px 14px', border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 8 }}>Xem trước</div>
@@ -126,7 +202,7 @@ export default function RepoNameBuilder({ mode, onModeChange, baseName, onBaseNa
             {preview.map(n => (
               <div key={n} style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ color: 'var(--text3)', fontSize: 10 }}>github.com/</span>
-                <span style={{ color: 'var(--text3)' }}>{username || 'username'}/</span>
+                <span style={{ color: 'var(--text3)' }}>{ownerDisplay}/</span>
                 <span style={{ color: 'var(--blue-bright)', fontWeight: 500 }}>{n}</span>
               </div>
             ))}
