@@ -25,10 +25,7 @@ export default function Sidebar({ activePage, onNavigate, username, avatarUrl, r
       {/* Logo */}
       <div className="sidebar-logo">
         <img src="/logo.png" alt="TVM Logo" />
-        <div className="sidebar-logo-text">
-          <div className="sidebar-logo-name">Trần Văn Mỹ</div>
-          <div className="sidebar-logo-sub">Full Stack · AI Dev</div>
-        </div>
+
       </div>
 
       <div className="sidebar-nav">
@@ -58,8 +55,8 @@ export default function Sidebar({ activePage, onNavigate, username, avatarUrl, r
           {avatarUrl
             ? <img src={avatarUrl} alt="" style={{ width: 18, height: 18, borderRadius: '50%' }} />
             : <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--blue-dim)', border: '1px solid var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: 'var(--blue-bright)' }}>
-                {username ? username[0].toUpperCase() : '?'}
-              </div>
+              {username ? username[0].toUpperCase() : '?'}
+            </div>
           }
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {username ? `@${username}` : 'Chưa đăng nhập'}
