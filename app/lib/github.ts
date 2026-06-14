@@ -168,6 +168,15 @@ export async function updateRepo(
     default_branch?: string;
   }
 ) {
+  // Lọc bỏ các field undefined để tránh gửi body rỗng lên GitHub API
+  const cleanUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([, v]) => v !== undefined)
+  );
+
+  if (Object.keys(cleanUpdates).length === 0) {
+    throw new Error('Không có thay đổi nào để cập nhật');
+  }
+
   const res = await fetch(`${BASE}/repos/${owner}/${oldName}`, {
     method: 'PATCH',
     headers: {
@@ -175,7 +184,7 @@ export async function updateRepo(
       'Content-Type': 'application/json',
       Accept: 'application/vnd.github.v3+json',
     },
-    body: JSON.stringify(updates),
+    body: JSON.stringify(cleanUpdates),
   });
   const data = await res.json();
   if (!res.ok) {

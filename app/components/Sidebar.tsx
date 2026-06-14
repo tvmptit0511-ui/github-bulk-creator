@@ -1,7 +1,7 @@
 'use client';
-import { LayoutDashboard, GitBranch, Wrench, History, Settings, HelpCircle, Zap, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Wrench, History, HelpCircle, Zap, ChevronRight } from 'lucide-react';
 
-type Page = 'dashboard' | 'creator' | 'manager' | 'history';
+type Page = 'dashboard' | 'creator' | 'manager' | 'history' | 'guide';
 
 interface Props {
   activePage: Page;
@@ -16,6 +16,7 @@ const navItems: { id: Page; label: string; icon: React.ReactNode; badge?: string
   { id: 'creator', label: 'Repo Creator', icon: <Zap size={15} /> },
   { id: 'manager', label: 'Quản lý', icon: <Wrench size={15} /> },
   { id: 'history', label: 'Lịch sử', icon: <History size={15} /> },
+  { id: 'guide', label: 'Hướng dẫn', icon: <HelpCircle size={15} /> },
 ];
 
 export default function Sidebar({ activePage, onNavigate, username, avatarUrl, repoCount }: Props) {
@@ -64,23 +65,6 @@ export default function Sidebar({ activePage, onNavigate, username, avatarUrl, r
             {username ? `@${username}` : 'Chưa đăng nhập'}
           </span>
         </button>
-      </div>
-
-      <div className="sidebar-bottom">
-        <button className="nav-item" style={{ fontSize: 12 }}>
-          <HelpCircle size={14} />
-          API Documentation
-        </button>
-        <button className="nav-item" style={{ fontSize: 12 }}>
-          <Settings size={14} />
-          Cài đặt
-        </button>
-
-        <div style={{ marginTop: 10, padding: '8px 8px', fontSize: 10, color: 'var(--text3)' }}>
-          © 2024 GitHub Bulk Creator
-          <br />
-          <span style={{ color: 'var(--text3)' }}>Technical & High-Velocity.</span>
-        </div>
       </div>
     </nav>
   );

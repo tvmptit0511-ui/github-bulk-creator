@@ -1,13 +1,14 @@
 'use client';
 import { Bell, Search, Settings } from 'lucide-react';
 
-type Page = 'dashboard' | 'creator' | 'manager' | 'history';
+type Page = 'dashboard' | 'creator' | 'manager' | 'history' | 'guide';
 
 const PAGE_LABELS: Record<Page, { section: string; current: string }> = {
   dashboard: { section: 'GitHub Bulk Creator', current: 'Dashboard' },
   creator: { section: 'Repo Creator', current: 'Create New' },
   manager: { section: 'Repo Creator', current: 'Manage Repos' },
   history: { section: 'Repo Creator', current: 'History' },
+  guide: { section: 'Hướng dẫn', current: 'Hướng dẫn sử dụng' },
 };
 
 interface Props {

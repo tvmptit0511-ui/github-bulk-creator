@@ -10,11 +10,12 @@ import PerRepoFileManager, { RepoEntry } from './components/PerRepoFileManager';
 import LogPanel from './components/LogPanel';
 import HistoryPanel from './components/HistoryPanel';
 import RepoManager from './components/RepoManager';
+import GuidePage from './components/GuidePage'; // ← THÊM DÒNG NÀY
 import { createRepo, uploadFile, listUserOrgs, OrgInfo } from './lib/github';
 import { saveHistory, getHistory } from './lib/storage';
 import { CreationMode, LogItem, RepoFile } from './types';
 
-type Page = 'dashboard' | 'creator' | 'manager' | 'history';
+type Page = 'dashboard' | 'creator' | 'manager' | 'history' | 'guide'; // ← thêm 'guide'
 
 export default function Home() {
   const [page, setPage] = useState<Page>('dashboard');
@@ -93,7 +94,6 @@ export default function Home() {
     let ok = 0, err = 0;
     const results: { name: string; status: 'ok' | 'err'; url?: string; error?: string }[] = [];
 
-    // owner dùng để upload file: nếu tạo trong org thì owner = org, ngược lại = username
     const effectiveOwner = selectedOrg || username;
 
     for (const name of names) {
@@ -140,7 +140,6 @@ export default function Home() {
     setSelectedOrg('');
     setOrgs([]);
 
-    // Fetch danh sách tổ chức
     setOrgsLoading(true);
     try {
       const data = await listUserOrgs(t);
@@ -320,6 +319,9 @@ export default function Home() {
               <HistoryPanel />
             </div>
           )}
+
+          {/* ── GUIDE ── */}
+          {page === 'guide' && <GuidePage />}
 
         </div>
       </div>

@@ -112,9 +112,30 @@ export default function RepoManager({ token, username }: Props) {
             updateLog(name, { status: 'ok', message: `✓ → @${actionCfg.newOwner}` }); ok++; setOkCount(ok); break;
           }
           case 'visibility': {
-            await updateRepo(token, effectiveOwner, name, { private: actionCfg.makePrivate });
-            setRepos(prev => prev.map(r => r.name === name ? { ...r, private: !!actionCfg.makePrivate } : r));
-            updateLog(name, { status: 'ok', message: `✓ → ${actionCfg.makePrivate ? 'Private' : 'Public'}` }); ok++; setOkCount(ok); break;
+            if (actionCfg.makePrivate === undefined) {
+              throw new Error('Chưa chọn Public/Private');
+            }
+
+            const result = await updateRepo(token, effectiveOwner, name, {
+              private: actionCfg.makePrivate,
+            });
+
+            // Verify GitHub thực sự đã đổi
+            if (result.private !== actionCfg.makePrivate) {
+              throw new Error(
+                `Không thể đổi sang ${actionCfg.makePrivate ? 'Private' : 'Public'} — kiểm tra quyền token`
+              );
+            }
+
+            setRepos(prev =>
+              prev.map(r => r.name === name ? { ...r, private: !!actionCfg.makePrivate } : r)
+            );
+            updateLog(name, {
+              status: 'ok',
+              message: `✓ → ${actionCfg.makePrivate ? 'Private' : 'Public'}`,
+            });
+            ok++; setOkCount(ok);
+            break;
           }
           case 'description': {
             await updateRepo(token, effectiveOwner, name, { description: actionCfg.description ?? '' });
@@ -239,7 +260,12 @@ export default function RepoManager({ token, username }: Props) {
                 <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>⚡ Hành động hàng loạt</div>
                 <div style={{ marginBottom: 12 }}>
                   <label>Loại hành động</label>
-                  <select value={actionType} onChange={e => { const t = e.target.value as BulkAction; setActionType(t); setActionCfg({ type: t }); setConfirmDelete(false); }}>
+                  <select value={actionType} onChange={e => {
+                    const t = e.target.value as BulkAction;
+                    setActionType(t);
+                    setActionCfg({ type: t, makePrivate: t === 'visibility' ? false : undefined });
+                    setConfirmDelete(false);
+                  }}>
                     {(Object.keys(ACTION_LABELS) as BulkAction[]).map(k => <option key={k} value={k}>{ACTION_LABELS[k]}</option>)}
                   </select>
                 </div>
