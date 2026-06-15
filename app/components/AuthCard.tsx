@@ -109,8 +109,8 @@ export default function AuthCard({ onAuth }: Props) {
             : status === 'ok' ? <><CheckCircle size={13} /> Đã xác thực</> : 'Xác thực'}
         </button>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>
-          Cần quyền <code>repo</code> + <code>read:org</code> ·{' '}
-          <a href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator" target="_blank" rel="noreferrer">Tạo token ↗</a>
+          Cần đủ quyền ·{' '}
+          <a href="https://github.com/settings/tokens/new?scopes=repo,workflow,write:packages,delete:packages,admin:org,admin:public_key,admin:repo_hook,admin:org_hook,gist,notifications,user,delete_repo,write:discussion,admin:enterprise,audit_log,codespace,copilot,write:network_configurations,project,admin:gpg_key,admin:ssh_signing_key&description=GH+Bulk+Creator" target="_blank" rel="noreferrer">Tạo token ↗</a>
         </span>
       </div>
 
@@ -122,7 +122,7 @@ export default function AuthCard({ onAuth }: Props) {
       {scopeWarning && (
         <div style={{ padding: '9px 12px', background: 'var(--yellow-dim)', border: '1px solid rgba(210,153,34,0.25)', borderRadius: 8, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--orange)' }}>
           <AlertTriangle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
-          <span>{scopeWarning}{' '}<a href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GH+Bulk+Creator" target="_blank" rel="noreferrer">Tạo token mới ↗</a></span>
+          <span>{scopeWarning}{' '}<a href="https://github.com/settings/tokens/new?scopes=repo,workflow,write:packages,delete:packages,admin:org,admin:public_key,admin:repo_hook,admin:org_hook,gist,notifications,user,delete_repo,write:discussion,admin:enterprise,audit_log,codespace,copilot,write:network_configurations,project,admin:gpg_key,admin:ssh_signing_key&description=GH+Bulk+Creator" target="_blank" rel="noreferrer">Tạo token mới ↗</a></span>
         </div>
       )}
     </div>

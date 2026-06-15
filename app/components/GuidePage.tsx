@@ -41,9 +41,9 @@ const steps: Step[] = [
     desc: 'Lấy Personal Access Token từ GitHub để xác thực',
     detail: (
       <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <li>Truy cập <a href="https://github.com/settings/tokens/new" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>github.com/settings/tokens <ExternalLink size={11} /></a></li>
+        <li>Truy cập <a href="https://github.com/settings/tokens/new?scopes=repo,workflow,write:packages,delete:packages,admin:org,admin:public_key,admin:repo_hook,admin:org_hook,gist,notifications,user,delete_repo,write:discussion,admin:enterprise&description=GH+Bulk+Creator" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>github.com/settings/tokens <ExternalLink size={11} /></a></li>
         <li>Đặt tên token (vd: <code style={codeStyle}>bulk-creator</code>)</li>
-        <li>Chọn scope: <code style={codeStyle}>repo</code> (toàn bộ quyền repo) và <code style={codeStyle}>read:org</code> (nếu dùng tổ chức)</li>
+        <li>Tất cả scope sẽ được tích sẵn tự động</li>
         <li>Nhấn <strong>Generate token</strong> và copy lại</li>
       </ol>
     ),
