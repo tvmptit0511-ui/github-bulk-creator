@@ -272,7 +272,42 @@ export default function RepoManager({ token, username }: Props) {
                 {actionType === 'rename_prefix' && <div style={{ marginBottom: 12 }}><label>Tiền tố thêm vào đầu</label><input type="text" placeholder="vd: 2024_" value={actionCfg.prefix ?? ''} onChange={e => setActionCfg(c => ({ ...c, prefix: e.target.value }))} /></div>}
                 {actionType === 'rename_suffix' && <div style={{ marginBottom: 12 }}><label>Hậu tố thêm vào cuối</label><input type="text" placeholder="vd: _archive" value={actionCfg.suffix ?? ''} onChange={e => setActionCfg(c => ({ ...c, suffix: e.target.value }))} /></div>}
                 {actionType === 'rename_replace' && <div style={{ marginBottom: 12 }}><div style={{ marginBottom: 8 }}><label>Tìm chuỗi</label><input type="text" placeholder="vd: ss3_" value={actionCfg.findStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, findStr: e.target.value }))} /></div><div><label>Thay bằng</label><input type="text" placeholder="vd: lab_ (để trống = xoá)" value={actionCfg.replaceStr ?? ''} onChange={e => setActionCfg(c => ({ ...c, replaceStr: e.target.value }))} /></div></div>}
-                {actionType === 'transfer' && <div style={{ marginBottom: 12 }}><label>Owner mới</label><input type="text" placeholder="vd: my-organization" value={actionCfg.newOwner ?? ''} onChange={e => setActionCfg(c => ({ ...c, newOwner: e.target.value }))} /><p style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 4 }}>⚠ Owner mới phải có quyền nhận repo</p></div>}
+                {actionType === 'transfer' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label>Owner mới</label>
+                    <div style={{ position: 'relative' }}>
+                      <div style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', zIndex: 1, display: 'flex', alignItems: 'center' }}>
+                        {!actionCfg.newOwner || actionCfg.newOwner === username ? (
+                          <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent), var(--green))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#fff' }}>
+                            {(username[0] ?? '?').toUpperCase()}
+                          </div>
+                        ) : (() => {
+                          const org = orgs.find(o => o.login === actionCfg.newOwner);
+                          return org?.avatar_url
+                            ? <img src={org.avatar_url} alt={org.login} style={{ width: 18, height: 18, borderRadius: 3 }} />
+                            : <Building2 size={14} color="var(--text2)" />;
+                        })()}
+                      </div>
+                      <select
+                        value={actionCfg.newOwner ?? ''}
+                        onChange={e => setActionCfg(c => ({ ...c, newOwner: e.target.value }))}
+                        style={{ width: '100%', paddingLeft: 36, paddingRight: 32, appearance: 'none' }}
+                      >
+                        <option value="">— Chọn owner —</option>
+                        <option value={username}>@{username} (cá nhân)</option>
+                        {orgs.map(o => (
+                          <option key={o.login} value={o.login}>{o.login} (org)</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text2)' }} />
+                    </div>
+                    {orgsLoading && <p style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>Đang tải danh sách org...</p>}
+                    {!orgsLoading && orgs.length === 0 && (
+                      <p style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>Không tìm thấy org — cần scope <code style={{ fontSize: 10 }}>read:org</code></p>
+                    )}
+                    <p style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 4 }}>⚠ Owner mới phải có quyền nhận repo</p>
+                  </div>
+                )}
                 {actionType === 'visibility' && <div style={{ marginBottom: 12 }}><label>Đổi thành</label><div className="segment-group"><button className={`segment-btn${!actionCfg.makePrivate ? ' active' : ''}`} onClick={() => setActionCfg(c => ({ ...c, makePrivate: false }))}>Public</button><button className={`segment-btn${actionCfg.makePrivate ? ' active' : ''}`} onClick={() => setActionCfg(c => ({ ...c, makePrivate: true }))}>Private</button></div></div>}
                 {actionType === 'description' && <div style={{ marginBottom: 12 }}><label>Mô tả mới</label><input type="text" placeholder="Mô tả repo..." value={actionCfg.description ?? ''} onChange={e => setActionCfg(c => ({ ...c, description: e.target.value }))} /></div>}
                 {actionType === 'delete' && <div style={{ padding: '8px 10px', background: 'var(--red-dim)', border: '1px solid rgba(248,81,73,0.3)', borderRadius: 6, marginBottom: 12, fontSize: 12 }}><div style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--red)', fontWeight: 600 }}><AlertTriangle size={13} /> Không thể hoàn tác!</div><div style={{ color: 'var(--text3)', marginTop: 3 }}>Repo bị xoá sẽ mất vĩnh viễn.</div></div>}
