@@ -34,7 +34,8 @@ export async function uploadFile(
   repo: string,
   file: RepoFile
 ) {
-  const path = encodeURIComponent(file.name);
+  // encode từng segment riêng để giữ dấu / → GitHub tạo đúng folder
+  const path = file.name.split('/').map(encodeURIComponent).join('/');
   const res = await fetch(`${BASE}/repos/${owner}/${repo}/contents/${path}`, {
     method: 'PUT',
     headers: {

@@ -28,42 +28,149 @@ function formatBytes(b: number) {
   return (b / 1048576).toFixed(1) + 'MB';
 }
 
+// ── Folder traversal helpers (mirror of FileUploader.tsx) ────────────────────
+function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise(resolve => {
+    const all: FileSystemEntry[] = [];
+    const readBatch = () => {
+      reader.readEntries(
+        entries => { if (entries.length === 0) resolve(all); else { all.push(...entries); readBatch(); } },
+        () => resolve(all)
+      );
+    };
+    readBatch();
+  });
+}
+
+function getFileFromEntry(entry: FileSystemFileEntry): Promise<File | null> {
+  return new Promise(resolve => { entry.file(f => resolve(f), () => resolve(null)); });
+}
+
+async function traverseEntry(entry: FileSystemEntry, prefix = ''): Promise<{ path: string; file: File }[]> {
+  try {
+    if (entry.isFile) {
+      const file = await getFileFromEntry(entry as FileSystemFileEntry);
+      if (!file) return [];
+      return [{ path: prefix + entry.name, file }];
+    }
+    if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      const children = await readAllEntries(reader);
+      const results: { path: string; file: File }[] = [];
+      for (const child of children) results.push(...await traverseEntry(child, prefix + entry.name + '/'));
+      return results;
+    }
+  } catch { /* bỏ qua entry lỗi */ }
+  return [];
+}
+
+function toBase64(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    if (file.size === 0) { res(btoa('\n')); return; }
+    const r = new FileReader();
+    r.onload = () => { const s = r.result as string; res(s.includes(',') ? s.split(',')[1] : s); };
+    r.onerror = () => rej(new Error(r.error?.message ?? `Không thể đọc: ${file.name}`));
+    r.readAsDataURL(file);
+  });
+}
+
+async function processRawEntries(entries: { path: string; file: File }[]): Promise<RepoFile[]> {
+  const MAX = 5 * 1024 * 1024;
+  const out: RepoFile[] = [];
+  const errors: string[] = [];
+  for (const { path, file } of entries) {
+    if (file.size > MAX) { errors.push(`"${path}" > 5MB`); continue; }
+    try {
+      const content = await toBase64(file);
+      out.push({ id: crypto.randomUUID(), name: path, content, size: file.size, type: file.type || 'application/octet-stream' });
+    } catch (err) {
+      errors.push(`"${path}": ${err instanceof Error ? err.message : 'Lỗi đọc file'}`);
+    }
+  }
+  if (errors.length > 0) alert(`Bỏ qua ${errors.length} file:\n` + errors.slice(0, 5).join('\n'));
+  return out;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
   const [drag, setDrag] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const dragCounter = useRef(0);
 
-  async function process(raw: FileList | null) {
-    if (!raw) return;
-    const out: RepoFile[] = [];
-    for (const f of Array.from(raw)) {
-      if (f.size > 5 * 1024 * 1024) { alert(`"${f.name}" > 5MB, bỏ qua.`); continue; }
-      const content = await new Promise<string>((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res((r.result as string).split(',')[1]);
-        r.onerror = rej;
-        r.readAsDataURL(f);
-      });
-      out.push({ id: crypto.randomUUID(), name: f.name, content, size: f.size, type: f.type });
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDrag(false);
+    setLoading(true);
+    try {
+      const items = Array.from(e.dataTransfer.items).filter(i => i.kind === 'file');
+      const allEntries: { path: string; file: File }[] = [];
+      for (const item of items) {
+        try {
+          const entry = item.webkitGetAsEntry?.();
+          if (entry) {
+            allEntries.push(...await traverseEntry(entry));
+          } else {
+            const file = item.getAsFile();
+            if (file) allEntries.push({ path: file.name, file });
+          }
+        } catch { /* bỏ qua */ }
+      }
+      if (allEntries.length > 0) onFiles(await processRawEntries(allEntries));
+    } finally {
+      setLoading(false);
     }
-    onFiles(out);
+  }
+
+  async function handleInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.files;
+    e.target.value = '';
+    if (!raw || raw.length === 0) return;
+    setLoading(true);
+    try {
+      const entries = Array.from(raw).map(f => ({
+        path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+        file: f,
+      }));
+      onFiles(await processRawEntries(entries));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div
-      onDragOver={e => { e.preventDefault(); setDrag(true); }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={e => { e.preventDefault(); setDrag(false); process(e.dataTransfer.files); }}
-      onClick={() => ref.current?.click()}
+      onDragEnter={e => { e.preventDefault(); dragCounter.current++; setDrag(true); }}
+      onDragLeave={e => { e.preventDefault(); if (--dragCounter.current === 0) setDrag(false); }}
+      onDragOver={e => e.preventDefault()}
+      onDrop={handleDrop}
       style={{
         border: `1.5px dashed ${drag ? 'var(--blue)' : 'var(--border)'}`,
-        borderRadius: 6, padding: '10px', textAlign: 'center', cursor: 'pointer',
+        borderRadius: 6, padding: '10px', textAlign: 'center',
         background: drag ? 'var(--blue-dim)' : 'transparent', transition: 'all 0.15s',
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, color: 'var(--text2)',
       }}
     >
-      <Upload size={13} />
-      <span>Kéo thả hoặc <span style={{ color: 'var(--blue-bright)' }}>chọn file</span></span>
-      <input ref={ref} type="file" multiple style={{ display: 'none' }} onChange={e => process(e.target.files)} />
+      {loading ? (
+        <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
+      ) : (
+        <>
+          <Upload size={13} />
+          <span>
+            Kéo thả file/folder hoặc{' '}
+            <span style={{ color: 'var(--blue-bright)', cursor: 'pointer' }} onClick={() => fileRef.current?.click()}>chọn file</span>
+            {' '}·{' '}
+            <span style={{ color: 'var(--blue-bright)', cursor: 'pointer' }} onClick={() => folderRef.current?.click()}>chọn folder</span>
+          </span>
+        </>
+      )}
+      <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={handleInput} />
+      <input ref={folderRef} type="file" multiple
+        // @ts-expect-error webkitdirectory không có trong typing chuẩn
+        webkitdirectory=""
+        style={{ display: 'none' }} onChange={handleInput} />
     </div>
   );
 }
