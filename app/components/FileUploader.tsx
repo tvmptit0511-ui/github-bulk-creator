@@ -115,48 +115,16 @@ export default function FileUploader({ files, onChange }: Props) {
 
   const mergeIntoExisting = useCallback(
     (newFiles: RepoFile[]) => {
-      onChange(prev => {
-        const merged = [...prev];
-        for (const nf of newFiles) {
-          const idx = merged.findIndex(x => x.name === nf.name);
-          if (idx === -1) merged.push(nf);
-          else merged[idx] = nf;
-        }
-        return merged;
-      });
-    },
-    [onChange]
-  );
-  async function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    dragCounter.current = 0;
-    setDragging(false);
-    setLoading(true);
-
-    try {
-      const items = Array.from(e.dataTransfer.items).filter(i => i.kind === 'file');
-      const allEntries: { path: string; file: File }[] = [];
-
-      for (const item of items) {
-        try {
-          const entry = item.webkitGetAsEntry?.();
-          if (entry) {
-            setLoadingMsg('Đang quét thư mục...');
-            const sub = await traverseEntry(entry);
-            allEntries.push(...sub);
-          } else {
-            const file = item.getAsFile();
-            if (file) allEntries.push({ path: file.name, file });
-          }
-        } catch (err) {
-          console.error('Item error:', err); // ← THÊM
-        }
+      const merged = [...files];
+      for (const nf of newFiles) {
+        const idx = merged.findIndex(x => x.name === nf.name);
+        if (idx === -1) merged.push(nf);
+        else merged[idx] = nf;
       }
-      // ...
-    } catch (err) {
-      console.error('Drop error full:', err, String(err)); // ← SỬA dòng này
-    }
-  }
+      onChange(merged);
+    },
+    [files, onChange]
+  );
   // Xử lý danh sách { path, file } → RepoFile[]
   async function processEntries(entries: { path: string; file: File }[]) {
     const MAX = 5 * 1024 * 1024;
