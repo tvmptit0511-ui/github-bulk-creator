@@ -105,18 +105,29 @@ function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
     setDrag(false);
     setLoading(true);
     try {
+      // Lấy entry/file của TẤT CẢ item ngay, đồng bộ, trước bất kỳ await nào.
+      // DataTransferItemList chỉ hợp lệ trong tick đồng bộ của event drop;
+      // gọi webkitGetAsEntry() sau một await (vd. lúc traverse folder đầu)
+      // làm các item còn lại trả về null → chỉ nhận được 1 file/folder.
       const items = Array.from(e.dataTransfer.items).filter(i => i.kind === 'file');
+      const grabbed: { entry: FileSystemEntry | null; file: File | null }[] = items.map(item => ({
+        entry: item.webkitGetAsEntry?.() ?? null,
+        file: item.getAsFile(),
+      }));
+
       const allEntries: { path: string; file: File }[] = [];
-      for (const item of items) {
+      for (const { entry, file } of grabbed) {
         try {
-          const entry = item.webkitGetAsEntry?.();
-          if (entry) {
+          if (entry && entry.isDirectory) {
             allEntries.push(...await traverseEntry(entry));
-          } else {
-            const file = item.getAsFile();
-            if (file) allEntries.push({ path: file.name, file });
+          } else if (entry && entry.isFile) {
+            const f = await getFileFromEntry(entry as FileSystemFileEntry);
+            if (f) allEntries.push({ path: entry.name, file: f });
+            else if (file) allEntries.push({ path: file.name, file });
+          } else if (file) {
+            allEntries.push({ path: file.name, file });
           }
-        } catch { /* bỏ qua */ }
+        } catch { /* bỏ qua entry lỗi, không hỏng cả batch */ }
       }
       if (allEntries.length > 0) onFiles(await processRawEntries(allEntries));
     } finally {

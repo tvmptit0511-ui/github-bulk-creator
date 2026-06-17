@@ -200,23 +200,38 @@ export default function FileUploader({ files, onChange }: Props) {
     setLoading(true);
 
     try {
-      // Phải copy items TRƯỚC khi await — dataTransfer bị clear sau khi event kết thúc
+      // BƯỚC 1 (PHẢI ĐỒNG BỘ — không await ở giữa):
+      // DataTransferItemList chỉ "sống" trong đúng tick của event drop.
+      // Nếu gọi webkitGetAsEntry()/getAsFile() SAU một await (ví dụ trong
+      // lúc traverse folder đầu tiên), trình duyệt (Chrome) đã invalidate
+      // session kéo-thả → các item còn lại trả về null/rỗng.
+      // => Đây là lý do chỉ nhận được 1 file/folder dù kéo nhiều.
+      // Fix: lấy hết entry/file của TẤT CẢ item ngay lập tức, rồi mới
+      // traverse (bất đồng bộ) ở bước 2.
       const items = Array.from(e.dataTransfer.items).filter(i => i.kind === 'file');
-      const allEntries: { path: string; file: File }[] = [];
+      const grabbed: { entry: FileSystemEntry | null; file: File | null }[] = items.map(item => ({
+        entry: item.webkitGetAsEntry?.() ?? null,
+        file: item.getAsFile(),
+      }));
 
-      for (const item of items) {
+      // BƯỚC 2 (có thể bất đồng bộ — an toàn vì đã lấy xong dữ liệu ở bước 1):
+      const allEntries: { path: string; file: File }[] = [];
+      let scannedFolder = false;
+      for (const { entry, file } of grabbed) {
         try {
-          const entry = item.webkitGetAsEntry?.();
-          if (entry) {
-            setLoadingMsg('Đang quét thư mục...');
+          if (entry && entry.isDirectory) {
+            if (!scannedFolder) { setLoadingMsg('Đang quét thư mục...'); scannedFolder = true; }
             const sub = await traverseEntry(entry);
             allEntries.push(...sub);
-          } else {
-            const file = item.getAsFile();
-            if (file) allEntries.push({ path: file.name, file });
+          } else if (entry && entry.isFile) {
+            const f = await getFileFromEntry(entry as FileSystemFileEntry);
+            if (f) allEntries.push({ path: entry.name, file: f });
+            else if (file) allEntries.push({ path: file.name, file });
+          } else if (file) {
+            allEntries.push({ path: file.name, file });
           }
         } catch {
-          // bỏ qua item lỗi
+          // bỏ qua entry/file lỗi, không làm hỏng cả batch
         }
       }
 
