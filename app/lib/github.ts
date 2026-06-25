@@ -1,7 +1,150 @@
 import { RepoFile } from '@/app/types';
-import { generateCommitMessage } from '@/app/lib/ai';
 
 const BASE = 'https://api.github.com';
+
+// ─── AI Commit Message Generator ─────────────────────────────────────────────
+
+/**
+ * Generates a meaningful commit message using Claude AI.
+ * Falls back to a simple default if the AI call fails.
+ */
+async function generateCommitMessage(
+  fileName: string,
+  fileContent: string, // base64
+  fileType: string,
+  action: 'add' | 'update' | 'delete'
+): Promise<string> {
+  try {
+    // Decode base64 content to get a preview (first ~500 chars)
+    let contentPreview = '';
+    try {
+      const decoded = atob(fileContent);
+      // Only use text-like content for context
+      if (fileType.includes('text') || fileType.includes('javascript') ||
+          fileType.includes('typescript') || fileType.includes('json') ||
+          fileType.includes('html') || fileType.includes('css') ||
+          fileType.includes('python') || fileType.includes('markdown') ||
+          fileName.match(/\.(ts|tsx|js|jsx|py|java|go|rs|php|rb|md|txt|json|yaml|yml|xml|html|css|scss|sh|bash)$/i)) {
+        contentPreview = decoded.slice(0, 600);
+      }
+    } catch {
+      // binary file, skip preview
+    }
+
+    const prompt = contentPreview
+      ? `Generate a concise, professional git commit message for this file action:
+- Action: ${action}
+- File: ${fileName}
+- Content preview:
+\`\`\`
+${contentPreview}
+\`\`\`
+
+Rules:
+- Start with a verb in imperative mood (Add, Update, Fix, Refactor, etc.)
+- Be specific about what the file does or contains
+- Max 72 characters
+- No quotes, no period at end
+- Examples: "Add authentication middleware for JWT validation", "Update user profile component with avatar upload"
+
+Output ONLY the commit message, nothing else.`
+      : `Generate a concise, professional git commit message for this file action:
+- Action: ${action}
+- File: ${fileName}
+- File type: ${fileType || 'binary/unknown'}
+
+Rules:
+- Start with a verb in imperative mood (Add, Update, Fix, etc.)
+- Be specific about the file name and likely purpose
+- Max 72 characters
+- No quotes, no period at end
+
+Output ONLY the commit message, nothing else.`;
+
+    const res = await fetch('/api/ai-commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+
+    if (!res.ok) throw new Error('AI commit API failed');
+
+    const data = await res.json();
+    const message = (data.message || '').trim();
+
+    // Validate: not empty, not too long
+    if (message && message.length > 3 && message.length <= 120) {
+      return message;
+    }
+    throw new Error('Invalid AI response');
+  } catch {
+    // Fallback: smarter static message based on file type & name
+    return buildFallbackMessage(fileName, action);
+  }
+}
+
+/**
+ * Builds a smarter fallback commit message without AI.
+ */
+function buildFallbackMessage(fileName: string, action: 'add' | 'update' | 'delete'): string {
+  const name = fileName.split('/').pop() || fileName;
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  const base = name.replace(/\.[^.]+$/, '');
+
+  const verbMap: Record<string, string> = {
+    add: 'Add',
+    update: 'Update',
+    delete: 'Remove',
+  };
+  const verb = verbMap[action] || 'Add';
+
+  // Context-aware descriptions based on file name patterns
+  if (name.match(/readme/i)) return `${verb} README documentation`;
+  if (name.match(/license/i)) return `${verb} project license`;
+  if (name.match(/\.gitignore/)) return `${verb} .gitignore rules`;
+  if (name.match(/dockerfile/i)) return `${verb} Dockerfile for containerization`;
+  if (name.match(/docker-compose/i)) return `${verb} Docker Compose configuration`;
+  if (name.match(/package\.json/)) return `${verb} package.json dependencies`;
+  if (name.match(/tsconfig/)) return `${verb} TypeScript configuration`;
+  if (name.match(/eslint|prettier|stylelint/i)) return `${verb} ${base} linting configuration`;
+  if (name.match(/\.env/i)) return `${verb} environment configuration`;
+  if (name.match(/index\.(ts|tsx|js|jsx)$/i)) return `${verb} module entry point`;
+  if (name.match(/\.test\.|\.spec\./i)) return `${verb} test suite for ${base.replace(/\.(test|spec)$/, '')}`;
+  if (name.match(/types?\.(ts|tsx|d\.ts)$/i)) return `${verb} TypeScript type definitions`;
+
+  // Extension-based fallbacks
+  const extMessages: Record<string, string> = {
+    ts: `${verb} ${base} TypeScript module`,
+    tsx: `${verb} ${base} React component`,
+    js: `${verb} ${base} JavaScript module`,
+    jsx: `${verb} ${base} React component`,
+    py: `${verb} ${base} Python script`,
+    java: `${verb} ${base} Java class`,
+    go: `${verb} ${base} Go module`,
+    rs: `${verb} ${base} Rust module`,
+    rb: `${verb} ${base} Ruby script`,
+    php: `${verb} ${base} PHP module`,
+    css: `${verb} ${base} styles`,
+    scss: `${verb} ${base} SCSS styles`,
+    html: `${verb} ${base} HTML template`,
+    json: `${verb} ${base} configuration`,
+    yaml: `${verb} ${base} YAML configuration`,
+    yml: `${verb} ${base} YAML configuration`,
+    md: `${verb} ${base} documentation`,
+    txt: `${verb} ${base} text file`,
+    sh: `${verb} ${base} shell script`,
+    sql: `${verb} ${base} SQL migration`,
+    png: `${verb} ${base} image asset`,
+    jpg: `${verb} ${base} image asset`,
+    jpeg: `${verb} ${base} image asset`,
+    svg: `${verb} ${base} SVG graphic`,
+    pdf: `${verb} ${base} PDF document`,
+  };
+
+  return extMessages[ext] || `${verb} ${fileName}`;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function createRepo(
   token: string,
@@ -26,28 +169,6 @@ export async function createRepo(
     const msg = data.errors?.map((e: { message: string }) => e.message).join(', ') || data.message || 'Unknown error';
     throw new Error(msg);
   }
-
-  // FIX: GitHub API bỏ qua description khi tạo empty repo (auto_init: false).
-  // PATCH lại ngay sau khi tạo để đảm bảo description luôn được lưu.
-  if (description && description.trim()) {
-    const owner = org ?? data.owner?.login;
-    if (owner) {
-      try {
-        await fetch(`${BASE}/repos/${owner}/${name}`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: `token ${token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/vnd.github.v3+json',
-          },
-          body: JSON.stringify({ description: description.trim() }),
-        });
-      } catch {
-        // Không throw — tạo repo vẫn thành công
-      }
-    }
-  }
-
   return data;
 }
 
@@ -57,10 +178,12 @@ export async function uploadFile(
   repo: string,
   file: RepoFile
 ) {
-  // Sinh commit message bằng AI, fallback về "Add <filename>" nếu lỗi
-  const commitMessage = await generateCommitMessage(file.name, repo, false, file.type);
-
+  // encode từng segment riêng để giữ dấu / → GitHub tạo đúng folder
   const path = file.name.split('/').map(encodeURIComponent).join('/');
+
+  // 🆕 Generate AI commit message instead of hardcoded "Add ..."
+  const commitMessage = await generateCommitMessage(file.name, file.content, file.type, 'add');
+
   const res = await fetch(`${BASE}/repos/${owner}/${repo}/contents/${path}`, {
     method: 'PUT',
     headers: {
@@ -69,7 +192,7 @@ export async function uploadFile(
       Accept: 'application/vnd.github.v3+json',
     },
     body: JSON.stringify({
-      message: commitMessage,
+      message: commitMessage,  // 🆕 was: `Add ${file.name}`
       content: file.content,
     }),
   });
@@ -306,7 +429,7 @@ export async function upsertFile(
   const encodedPath = file.name.split('/').map(encodeURIComponent).join('/');
   const url = `${BASE}/repos/${owner}/${repo}/contents/${encodedPath}`;
 
-  // Check nếu file đã tồn tại để lấy SHA (cần cho update)
+  // Check if file exists to get SHA (needed for update)
   let sha: string | undefined;
   try {
     const check = await fetch(url, {
@@ -320,14 +443,16 @@ export async function upsertFile(
       sha = existing.sha;
     }
   } catch {
-    // file chưa tồn tại — bình thường
+    // file does not exist — that's fine
   }
 
-  // Sinh commit message bằng AI, phân biệt add vs update
-  const commitMessage = await generateCommitMessage(file.name, repo, !!sha, file.type);
+  const action: 'add' | 'update' = sha ? 'update' : 'add';
+
+  // 🆕 Generate AI commit message instead of hardcoded "Add/Update ..."
+  const commitMessage = await generateCommitMessage(file.name, file.content, file.type, action);
 
   const body: Record<string, unknown> = {
-    message: commitMessage,
+    message: commitMessage,  // 🆕 was: sha ? `Update ${file.name}` : `Add ${file.name}`
     content: file.content,
   };
   if (sha) body.sha = sha;
@@ -357,8 +482,12 @@ export async function deleteRepoFile(
   branch?: string
 ): Promise<void> {
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+
+  // 🆕 AI-generated delete message too
+  const commitMessage = await generateCommitMessage(filePath, '', 'application/octet-stream', 'delete');
+
   const body: Record<string, unknown> = {
-    message: `chore: remove ${filePath}`,
+    message: commitMessage,  // 🆕 was: `Delete ${filePath}`
     sha,
   };
   if (branch) body.branch = branch;
