@@ -1,4 +1,5 @@
 import { RepoFile } from '@/app/types';
+import { generateCommitMessage } from '@/app/lib/ai';
 
 const BASE = 'https://api.github.com';
 
@@ -25,6 +26,28 @@ export async function createRepo(
     const msg = data.errors?.map((e: { message: string }) => e.message).join(', ') || data.message || 'Unknown error';
     throw new Error(msg);
   }
+
+  // FIX: GitHub API bỏ qua description khi tạo empty repo (auto_init: false).
+  // PATCH lại ngay sau khi tạo để đảm bảo description luôn được lưu.
+  if (description && description.trim()) {
+    const owner = org ?? data.owner?.login;
+    if (owner) {
+      try {
+        await fetch(`${BASE}/repos/${owner}/${name}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `token ${token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/vnd.github.v3+json',
+          },
+          body: JSON.stringify({ description: description.trim() }),
+        });
+      } catch {
+        // Không throw — tạo repo vẫn thành công
+      }
+    }
+  }
+
   return data;
 }
 
@@ -34,7 +57,9 @@ export async function uploadFile(
   repo: string,
   file: RepoFile
 ) {
-  // encode từng segment riêng để giữ dấu / → GitHub tạo đúng folder
+  // Sinh commit message bằng AI, fallback về "Add <filename>" nếu lỗi
+  const commitMessage = await generateCommitMessage(file.name, repo, false, file.type);
+
   const path = file.name.split('/').map(encodeURIComponent).join('/');
   const res = await fetch(`${BASE}/repos/${owner}/${repo}/contents/${path}`, {
     method: 'PUT',
@@ -44,7 +69,7 @@ export async function uploadFile(
       Accept: 'application/vnd.github.v3+json',
     },
     body: JSON.stringify({
-      message: `Add ${file.name}`,
+      message: commitMessage,
       content: file.content,
     }),
   });
@@ -169,7 +194,6 @@ export async function updateRepo(
     default_branch?: string;
   }
 ) {
-  // Lọc bỏ các field undefined để tránh gửi body rỗng lên GitHub API
   const cleanUpdates = Object.fromEntries(
     Object.entries(updates).filter(([, v]) => v !== undefined)
   );
@@ -248,7 +272,6 @@ export interface RepoContentItem {
   download_url: string | null;
 }
 
-/** List files/dirs at a given path inside a repo */
 export async function listRepoContents(
   token: string,
   owner: string,
@@ -270,11 +293,9 @@ export async function listRepoContents(
     throw new Error(data.message || 'Không thể lấy danh sách file');
   }
   const data = await res.json();
-  // GitHub returns a single object when path is a file
   return Array.isArray(data) ? data : [data];
 }
 
-/** Upload or overwrite a single file (upsert) */
 export async function upsertFile(
   token: string,
   owner: string,
@@ -285,7 +306,7 @@ export async function upsertFile(
   const encodedPath = file.name.split('/').map(encodeURIComponent).join('/');
   const url = `${BASE}/repos/${owner}/${repo}/contents/${encodedPath}`;
 
-  // Check if file exists to get SHA (needed for update)
+  // Check nếu file đã tồn tại để lấy SHA (cần cho update)
   let sha: string | undefined;
   try {
     const check = await fetch(url, {
@@ -299,11 +320,14 @@ export async function upsertFile(
       sha = existing.sha;
     }
   } catch {
-    // file does not exist — that's fine
+    // file chưa tồn tại — bình thường
   }
 
+  // Sinh commit message bằng AI, phân biệt add vs update
+  const commitMessage = await generateCommitMessage(file.name, repo, !!sha, file.type);
+
   const body: Record<string, unknown> = {
-    message: sha ? `Update ${file.name}` : `Add ${file.name}`,
+    message: commitMessage,
     content: file.content,
   };
   if (sha) body.sha = sha;
@@ -324,7 +348,6 @@ export async function upsertFile(
   }
 }
 
-/** Delete a single file by path */
 export async function deleteRepoFile(
   token: string,
   owner: string,
@@ -335,7 +358,7 @@ export async function deleteRepoFile(
 ): Promise<void> {
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
   const body: Record<string, unknown> = {
-    message: `Delete ${filePath}`,
+    message: `chore: remove ${filePath}`,
     sha,
   };
   if (branch) body.branch = branch;
@@ -355,7 +378,6 @@ export async function deleteRepoFile(
   }
 }
 
-/** Replace ALL files in repo: delete everything then upload new files */
 export async function replaceAllRepoFiles(
   token: string,
   owner: string,
@@ -364,18 +386,15 @@ export async function replaceAllRepoFiles(
   branch?: string,
   onProgress?: (msg: string) => void
 ): Promise<void> {
-  // 1. List existing files
   onProgress?.('Đang lấy danh sách file hiện tại...');
   const existing = await listRepoContents(token, owner, repo);
   const existingFiles = existing.filter(item => item.type === 'file');
 
-  // 2. Delete all existing files
   for (const f of existingFiles) {
     onProgress?.(`Xoá ${f.name}...`);
     await deleteRepoFile(token, owner, repo, f.path, f.sha, branch);
   }
 
-  // 3. Upload new files
   for (const f of newFiles) {
     onProgress?.(`Upload ${f.name}...`);
     await upsertFile(token, owner, repo, f, branch);

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Upload, X, File, FileCode, FileText, Image, Copy, Trash2, FolderOpen } from 'lucide-react';
 import { RepoFile } from '@/app/types';
 
@@ -95,9 +95,24 @@ async function processRawEntries(entries: { path: string; file: File }[]): Promi
 function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
+
+  // FIX 1: Dùng useRef thông thường thay vì useCallback ref.
+  // useCallback ref bị gọi lại mỗi khi drag/loading state thay đổi → component
+  // re-render → React unmount/remount input → webkitdirectory attribute bị mất
+  // trên node mới → folder picker không hoạt động.
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // FIX 2: Set webkitdirectory bằng useEffect một lần sau mount.
+  // setAttribute trong useEffect chạy sau khi DOM thực sự ổn định,
+  // không bị ảnh hưởng bởi re-render của parent.
+  useEffect(() => {
+    if (folderInputRef.current) {
+      folderInputRef.current.setAttribute('webkitdirectory', '');
+      folderInputRef.current.setAttribute('directory', ''); // Firefox
+    }
+  }, []); // chỉ chạy 1 lần sau mount
 
   async function handleDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -107,8 +122,7 @@ function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
     try {
       // Lấy entry/file của TẤT CẢ item ngay, đồng bộ, trước bất kỳ await nào.
       // DataTransferItemList chỉ hợp lệ trong tick đồng bộ của event drop;
-      // gọi webkitGetAsEntry() sau một await (vd. lúc traverse folder đầu)
-      // làm các item còn lại trả về null → chỉ nhận được 1 file/folder.
+      // gọi webkitGetAsEntry() sau một await làm các item còn lại trả về null.
       const items = Array.from(e.dataTransfer.items).filter(i => i.kind === 'file');
       const grabbed: { entry: FileSystemEntry | null; file: File | null }[] = items.map(item => ({
         entry: item.webkitGetAsEntry?.() ?? null,
@@ -136,12 +150,16 @@ function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
   }
 
   async function handleInput(e: React.ChangeEvent<HTMLInputElement>) {
+    // FIX 3: Copy FileList thành Array TRƯỚC khi reset value.
+    // e.target.value = '' xóa FileList ngay lập tức trên một số browser;
+    // Array.from() phải chạy trước để giữ tham chiếu đến các File objects.
     const raw = e.target.files;
-    e.target.value = '';
     if (!raw || raw.length === 0) return;
+    const fileArray = Array.from(raw); // snapshot trước khi reset
+    e.target.value = '';              // reset để có thể chọn lại cùng file
     setLoading(true);
     try {
-      const entries = Array.from(raw).map(f => ({
+      const entries = fileArray.map(f => ({
         path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
         file: f,
       }));
@@ -149,6 +167,17 @@ function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  // FIX 4: Tách handler click riêng để mở file dialog theo cách đáng tin cậy hơn.
+  // Dùng input.click() thay vì label+htmlFor tránh bị block bởi event propagation
+  // từ div cha có onDragOver handler.
+  function openFilePicker() {
+    fileInputRef.current?.click();
+  }
+
+  function openFolderPicker() {
+    folderInputRef.current?.click();
   }
 
   return (
@@ -164,6 +193,22 @@ function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, color: 'var(--text2)',
       }}
     >
+      {/* Hidden inputs — luôn render, không ẩn trong loading state để ref luôn valid */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleInput}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleInput}
+      />
+
       {loading ? (
         <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span>
       ) : (
@@ -171,17 +216,24 @@ function DropZone({ onFiles }: { onFiles: (f: RepoFile[]) => void }) {
           <Upload size={13} />
           <span>
             Kéo thả file/folder hoặc{' '}
-            <span style={{ color: 'var(--blue-bright)', cursor: 'pointer' }} onClick={() => fileRef.current?.click()}>chọn file</span>
+            <button
+              type="button"
+              onClick={openFilePicker}
+              style={{ background: 'none', border: 'none', padding: 0, color: 'var(--blue-bright)', cursor: 'pointer', font: 'inherit', fontSize: 'inherit' }}
+            >
+              chọn file
+            </button>
             {' '}·{' '}
-            <span style={{ color: 'var(--blue-bright)', cursor: 'pointer' }} onClick={() => folderRef.current?.click()}>chọn folder</span>
+            <button
+              type="button"
+              onClick={openFolderPicker}
+              style={{ background: 'none', border: 'none', padding: 0, color: 'var(--blue-bright)', cursor: 'pointer', font: 'inherit', fontSize: 'inherit' }}
+            >
+              chọn folder
+            </button>
           </span>
         </>
       )}
-      <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={handleInput} />
-      <input ref={folderRef} type="file" multiple
-        // @ts-expect-error webkitdirectory không có trong typing chuẩn
-        webkitdirectory=""
-        style={{ display: 'none' }} onChange={handleInput} />
     </div>
   );
 }
