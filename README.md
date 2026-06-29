@@ -2,7 +2,7 @@
 
 > Ứng dụng web giúp tạo, quản lý và cập nhật hàng loạt GitHub repository chỉ trong vài cú click — thay thế hoàn toàn quy trình thao tác tay lặp đi lặp lại trên GitHub.
 
-**Live demo:** [github-bulk-creator.vercel.app](https://github-bulk-creator.vercel.app)
+**Live demo:** [github-bulk-creator.vercel.app](https://vanmy-github.vercel.app)
 
 ---
 
